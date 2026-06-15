@@ -36,8 +36,17 @@ async def main() -> None:
     log = structlog.get_logger()
     log.info("starting_bot", environment=settings.environment)
 
+    missing = []
     if not settings.telegram_bot_token:
-        log.error("telegram_bot_token_missing")
+        missing.append("TELEGRAM_BOT_TOKEN")
+    if not settings.anthropic_api_key:
+        missing.append("ANTHROPIC_API_KEY")
+    if not settings.openai_api_key:
+        missing.append("OPENAI_API_KEY")
+    if not settings.database_url or "localhost" in settings.database_url:
+        missing.append("DATABASE_URL (must point to Neon)")
+    if missing:
+        log.error("env_vars_missing", missing=missing)
         return
 
     bot = Bot(token=settings.telegram_bot_token)
