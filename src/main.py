@@ -10,6 +10,7 @@ from src.bot.handlers.commands import router as commands_router
 from src.bot.handlers.profile_edit import router as profile_edit_router
 from src.config import settings
 from src.bot.handlers.cv_upload import router as cv_upload_router
+from src.bot.handlers.voice import router as voice_router
 
 
 def configure_logging() -> None:
@@ -39,6 +40,7 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(commands_router)
     dp.include_router(cv_upload_router)
+    dp.include_router(voice_router)
     dp.include_router(profile_edit_router)
     log.info("polling_started")
     try:
