@@ -8,7 +8,7 @@ from src.agents.profile_agent import ProfileAgent
 from src.services.claude import ClaudeService
 from src.services.source_provisioning import provision_default_sources
 
-from src.db.models import Profile, User, UserState
+from src.db.models import Profile, User, UserState, UserReaction
 from src.db.session import async_session
 
 router = Router()
@@ -16,17 +16,19 @@ router = Router()
 
 WELCOME_TEXT = (
     "Привет! 👋\n\n"
-    "Я помогу тебе находить релевантные вакансии в Telegram-каналах и на hh.ru, "
-    "матчить их под твой профиль и присылать только то, что реально подходит.\n\n"
+    "Я помогу тебе находить релевантные вакансии в самых разных источниках, "
+    "мэтчить их под твой профиль и присылать только то, что реально подходит.\n\n"
     "Чтобы начать — давай соберём твой профиль через диалог.\n"
     "Нажми /edit_profile и расскажи о себе.\n\n"
     "Команды:\n"
     "/edit_profile — собрать или обновить профиль\n"
     "/show_profile — показать текущий профиль\n"
-    "/pause — остановить присылку вакансий\n"
-    "/resume — возобновить\n"
-    "/help — это сообщение"
-    "/done — завершить редактирование профиля"
+    "/pause — остановить поиск вакансий\n"
+    "/resume — возобновить поиск вакансий\n"
+    "/help — помощь\n"
+    "/done — завершить редактирование профиля\n"
+    "/run_now — запустить поиск прямо сейчас\n"
+    "/stats — моя статистика"
 )
 
 
@@ -199,3 +201,74 @@ def format_profile(data: dict) -> str:
             parts.append("• " + _escape_md(cv.get("filename", "без названия")))
 
     return "\n".join(parts)
+
+@router.message(Command("run_now"))
+async def cmd_run_now(message: Message) -> None:
+    """Manually trigger a job search cycle for this user only.
+
+    Useful for testing and on-demand fetch.
+    """
+    async with async_session() as session:
+        result = await session.execute(
+            select(User).where(User.telegram_id == message.from_user.id)
+        )
+        user = result.scalar_one_or_none()
+    if user is None:
+        await message.answer("Сначала напиши /start.")
+        return
+
+    await message.answer("🔄 Запускаю поиск... минут пять займёт.")
+
+    from src.workers.job_search import _process_user
+    try:
+        result = await _process_user(message.bot, user)
+        await message.answer(
+            f"Готово!\n"
+            f"Источников проверено: всё активное\n"
+            f"Свежих вакансий найдено: {result['fetched']}\n"
+            f"Прогнано через matcher: {result['matched']}\n"
+            f"Отправлено тебе: {result['delivered']}"
+        )
+    except Exception as e:
+        await message.answer(f"Ошибка во время поиска: {e}")
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message) -> None:
+    """Personal stats: how many vacancies delivered, reactions breakdown."""
+    from src.db.models import VacancyMatch
+
+    async with async_session() as session:
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == message.from_user.id)
+        )
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            await message.answer("Сначала напиши /start.")
+            return
+
+        match_result = await session.execute(
+            select(VacancyMatch).where(VacancyMatch.user_id == user.id)
+        )
+        matches = list(match_result.scalars())
+
+    if not matches:
+        await message.answer("Пока ни одной вакансии не присылала.")
+        return
+
+    total = len(matches)
+    liked = sum(1 for m in matches if m.user_reaction == UserReaction.liked)
+    disliked = sum(1 for m in matches if m.user_reaction == UserReaction.disliked)
+    applied = sum(1 for m in matches if m.user_reaction == UserReaction.applied)
+    no_reaction = total - liked - disliked - applied
+    avg_score = sum(m.match_score for m in matches) / total
+
+    await message.answer(
+        f"📊 Твоя статистика\n\n"
+        f"Всего получено: {total}\n"
+        f"Средний score: {avg_score:.1f}\n\n"
+        f"👍 интересно: {liked}\n"
+        f"📨 откликнулась: {applied}\n"
+        f"👎 не моё: {disliked}\n"
+        f"⏳ без реакции: {no_reaction}"
+    )
