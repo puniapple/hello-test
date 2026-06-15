@@ -116,12 +116,16 @@ class Source(Base):
 
 class SeenVacancy(Base):
     __tablename__ = "seen_vacancies"
-    __table_args__ = (UniqueConstraint("user_id", "vacancy_hash", name="uq_user_vacancy"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "vacancy_hash", name="uq_user_vacancy"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     vacancy_hash: Mapped[str] = mapped_column(String(64), index=True)
     source_type: Mapped[SourceType] = mapped_column(Enum(SourceType, name="source_type"))
+    content_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    global_external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

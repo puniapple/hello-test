@@ -8,6 +8,7 @@ engine = create_async_engine(
     settings.database_url,
     connect_args={"ssl": "require"},
     pool_pre_ping=True,
+    pool_recycle=300,
     echo=False,
 )
 

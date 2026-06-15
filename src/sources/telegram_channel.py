@@ -73,7 +73,7 @@ class TelegramChannelSource(JobSource):
             return None
 
         title = self._extract_title(text)
-        company = self._extract_company(text)
+        company = f"TG:@{channel_username}"
         salary = self._extract_salary(text)
         location = self._extract_location(text)
 
@@ -116,19 +116,6 @@ class TelegramChannelSource(JobSource):
             if len(line) > 5:
                 return line[:200]
         return "Вакансия"
-
-    @staticmethod
-    def _extract_company(text: str) -> str | None:
-        """Heuristic: look for 'Company:' or '@username' or 'в COMPANY'."""
-        patterns = [
-            r"(?:компани[яи]|company)[:\s]+([A-Za-zА-Яа-яёЁ0-9\-\.&\s]{2,50})",
-            r"в\s+([A-ZА-Я][A-Za-zА-Яа-я\-\.&]+(?:\s+[A-ZА-Я][A-Za-zА-Яа-я\-\.&]+){0,3})",
-        ]
-        for pat in patterns:
-            match = re.search(pat, text)
-            if match:
-                return match.group(1).strip()[:100]
-        return None
 
     @staticmethod
     def _extract_salary(text: str) -> str | None:

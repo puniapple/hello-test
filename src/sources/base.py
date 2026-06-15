@@ -27,12 +27,25 @@ class Vacancy:
 
     @property
     def hash(self) -> str:
-        """Stable identifier for deduplication."""
+        """Stable identifier for source-specific dedup."""
         key = f"{self.source_type.value}:{self.external_id}"
         return hashlib.sha256(key.encode()).hexdigest()
 
+    @property
+    def content_fingerprint(self) -> str:
+        """Cross-source fingerprint: same text from different channels matches."""
+        from src.services.dedup import compute_content_fingerprint
+        return compute_content_fingerprint(self.title, self.company, self.description)
+
+    @property
+    def global_external_id(self) -> str | None:
+        """Job-platform URL if any was found in description (hh.ru, lever, etc.)."""
+        from src.services.dedup import extract_global_external_id
+        # Сначала смотрим в описании, потом в самой URL вакансии
+        candidate = extract_global_external_id(self.description) or extract_global_external_id(self.url)
+        return candidate
+
     def to_storage_dict(self) -> dict[str, Any]:
-        """Serializable form for storing in vacancy_matches.vacancy_data."""
         return {
             "external_id": self.external_id,
             "source_type": self.source_type.value,
