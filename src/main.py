@@ -7,6 +7,7 @@ import structlog
 from aiogram import Bot, Dispatcher
 
 from src.bot.handlers.commands import router as commands_router
+from src.bot.handlers.profile_edit import router as profile_edit_router
 from src.config import settings
 
 
@@ -36,6 +37,7 @@ async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
     dp.include_router(commands_router)
+    dp.include_router(profile_edit_router)
 
     log.info("polling_started")
     try:
