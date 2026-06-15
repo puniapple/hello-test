@@ -6,6 +6,7 @@ from aiogram.types import Message
 from sqlalchemy import select
 from src.agents.profile_agent import ProfileAgent
 from src.services.claude import ClaudeService
+from src.services.source_provisioning import provision_default_sources
 
 from src.db.models import Profile, User, UserState
 from src.db.session import async_session
@@ -33,14 +34,20 @@ async def get_or_create_user(telegram_id: int, telegram_username: str | None) ->
     async with async_session() as session:
         result = await session.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
+        is_new = False
         if user is None:
             user = User(telegram_id=telegram_id, telegram_username=telegram_username)
             session.add(user)
             await session.flush()
             profile = Profile(user_id=user.id, profile_data={})
             session.add(profile)
-            await session.commit()
-            await session.refresh(user)
+            is_new = True
+
+        # Provision default sources (idempotent — safe to call for existing users)
+        await provision_default_sources(session, user.id)
+
+        await session.commit()
+        await session.refresh(user)
         return user
 
 

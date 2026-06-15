@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.2",
     "python-dotenv>=1.0",
     "structlog>=24.1",
+    "beautifulsoup4>=4.12",
 ]
 
 [build-system]
