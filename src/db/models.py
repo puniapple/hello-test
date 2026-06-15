@@ -46,6 +46,7 @@ class ChatContext(str, enum.Enum):
 class SourceType(str, enum.Enum):
     hh_ru = "hh_ru"
     telegram_channel = "telegram_channel"
+    career_site = "career_site"
 
 
 class UserReaction(str, enum.Enum):
