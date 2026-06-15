@@ -4,7 +4,9 @@ import asyncio
 import logging
 
 import structlog
+from aiogram import Bot, Dispatcher
 
+from src.bot.handlers.commands import router as commands_router
 from src.config import settings
 
 
@@ -25,8 +27,21 @@ def configure_logging() -> None:
 async def main() -> None:
     configure_logging()
     log = structlog.get_logger()
-    log.info("starting", environment=settings.environment)
-    log.info("phase_1_skeleton_ok")
+    log.info("starting_bot", environment=settings.environment)
+
+    if not settings.telegram_bot_token:
+        log.error("telegram_bot_token_missing")
+        return
+
+    bot = Bot(token=settings.telegram_bot_token)
+    dp = Dispatcher()
+    dp.include_router(commands_router)
+
+    log.info("polling_started")
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
