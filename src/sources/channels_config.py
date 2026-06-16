@@ -10,14 +10,27 @@ TELEGRAM_CHANNELS: list[str] = [
     "budujobs",
     "dddwork",
     "femtechforce",
+    "zarubezhom_jobs",
+    "careerspace",
+    "it_vakansii_jobs",
+    "theblueprintcareer",
+    "zdemcv",
+    "vitrinajobs",
+    "mirkreatorovjob",
+    "theyseeku",
     # Product / Project / Strategy
     "product_jobs",
+    "forproducts",
+    "projects_jobs_feed",
     # EdTech
     "edujobs",
     "whiteedtechwork",
     "practicum_experts",
     # Удалёнка / релокация
     "remocate",
+    "remote_jobs_relocate",
+    "choicy_work",
+    "rusukrjobs",
     # BD / коммуникации / управление
     "communication_department",
     # С прозрачными контактами работодателей
