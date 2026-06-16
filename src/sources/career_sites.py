@@ -22,59 +22,95 @@ USER_AGENT = (
 # site_id -> (display name, base url, parser function)
 ParserFn = Callable[[str, str], list[Vacancy]]
 
+# ════════════════════════════════════════════════════════════════════
+# Registry — теперь поддерживает оба типа парсеров: HTML и API
+# ════════════════════════════════════════════════════════════════════
 
-def _registry() -> dict[str, tuple[str, str, ParserFn]]:
+def _registry() -> dict[str, tuple]:
+    """site_id -> (display_name, fetch_kind, *args).
+
+    fetch_kind:
+      - "html": ходим GET-ом на URL, передаём HTML в parser_fn
+      - "greenhouse": универсальный Greenhouse API, args = (company_slug,)
+      - "teamtailor": универсальный Teamtailor HTML, args = (url, site_id)
+    """
     return {
-        "tochka": ("Точка Банк", "https://hr.tochka.com/vacancies/", _parse_tochka),
-        "indrive": ("inDrive", "https://careers.indrive.com/vacancies/", _parse_indrive),
-        "aviasales": ("Aviasales", "https://www.aviasales.ru/about/vacancies", _parse_aviasales),
-        "garage_eight": ("Garage Eight", "https://garage-eight.com/vacancies/", _parse_garage_eight),
-        "uzum": ("Uzum", "https://people.uzum.com/career/ru/vacancies", _parse_uzum),
-        "avito": ("Avito", "https://career.avito.com/vacancies/", _parse_avito),
-        "vk_company": ("VK Company", "https://team.vk.company/vacancy/", _parse_vk_company),
-        "yandex": ("Яндекс", "https://yandex.ru/jobs/vacancies", _parse_yandex),
-        "logika_moloka": ("Логика Молока", "https://career.logikamoloka.ru/vacancies/", _parse_logika_moloka),
-        "mvideo": ("М.Видео", "https://career.mvideoeldorado.ru/vacancies/", _parse_mvideo),
+        # ─── уже существующие HTML-парсеры ───
+        "tochka": ("Точка Банк", "html", "https://hr.tochka.com/vacancies/", _parse_tochka),
+        "indrive": ("inDrive", "html", "https://careers.indrive.com/vacancies/", _parse_indrive),
+        "aviasales": ("Aviasales", "html", "https://www.aviasales.ru/about/vacancies", _parse_aviasales),
+        "garage_eight": ("Garage Eight", "html", "https://garage-eight.com/vacancies/", _parse_garage_eight),
+        "uzum": ("Uzum", "html", "https://people.uzum.com/career/ru/vacancies", _parse_uzum),
+        "avito": ("Avito", "html", "https://career.avito.com/vacancies/", _parse_avito),
+        "vk_company": ("VK Company", "html", "https://team.vk.company/vacancy/", _parse_vk_company),
+        "yandex": ("Яндекс", "html", "https://yandex.ru/jobs/vacancies", _parse_yandex),
+        "logika_moloka": ("Логика Молока", "html", "https://career.logikamoloka.ru/vacancies/", _parse_logika_moloka),
+        "mvideo": ("М.Видео", "html", "https://career.mvideoeldorado.ru/vacancies", _parse_mvideo),
+
+        # ─── Greenhouse API: лёгко добавить любую компанию из их экосистемы ───
+        "anthropic": ("Anthropic", "greenhouse", "anthropic"),
+        "stripe": ("Stripe", "greenhouse", "stripe"),
+        "notion": ("Notion", "greenhouse", "notion"),
+        "linear": ("Linear", "greenhouse", "linear"),
+        "figma": ("Figma", "greenhouse", "figma"),
+        "mercury": ("Mercury", "greenhouse", "mercury"),
+        "plaid": ("Plaid", "greenhouse", "plaid"),
+        "datadog": ("Datadog", "greenhouse", "datadog"),
+        "vercel": ("Vercel", "greenhouse", "vercel"),
+        "duolingo": ("Duolingo", "greenhouse", "duolingo"),
+        "coursera": ("Coursera", "greenhouse", "coursera"),
+
+        # ─── Teamtailor HTML ───
+        "sumsub": ("Sumsub", "teamtailor", "https://careers.sumsub.com/jobs", "sumsub"),
+
+        # ─── кастомный HTML ───
+        "zalando": ("Zalando", "html", "https://jobs.zalando.com/en/jobs", _parse_zalando),
+        "lesta": ("Lesta Games", "html", "https://join.lesta.team", _parse_lesta),
     }
 
 
-
-# ---------- main source class ----------
-
 class CareerSiteSource(JobSource):
-    """Single class that dispatches to per-site parsers via registry.
-
-    source.identifier holds the site_id ('tochka', 'indrive', ...).
-    """
+    """Dispatch к разным типам fetcher'ов через _registry."""
 
     def __init__(self, timeout: float = 20.0):
         self.timeout = timeout
 
     async def fetch(self, source: Source) -> list[Vacancy]:
-        registry = _registry()
-        entry = registry.get(source.identifier)
+        entry = _registry().get(source.identifier)
         if entry is None:
             return []
-        _company, url, parser = entry
 
-        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
-            response = await client.get(url, headers={"User-Agent": USER_AGENT})
-            if response.status_code != 200:
-                return []
-            html = response.text
+        display_name, kind, *args = entry
 
-        return parser(html, url)
+        if kind == "html":
+            url, parser = args
+            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
+                try:
+                    response = await client.get(url, headers={"User-Agent": USER_AGENT})
+                    if response.status_code != 200:
+                        return []
+                    return parser(response.text, url)
+                except httpx.HTTPError:
+                    return []
+
+        if kind == "greenhouse":
+            (company_slug,) = args
+            return await _fetch_greenhouse(company_slug, display_name)
+
+        if kind == "teamtailor":
+            url, site_id = args
+            return await _fetch_teamtailor(url, display_name, site_id)
+
+        return []
 
 
 def get_career_site_ids() -> list[str]:
-    """All registered site_ids (used by provisioning)."""
     return list(_registry().keys())
 
 
 def get_company_name(site_id: str) -> str | None:
     entry = _registry().get(site_id)
     return entry[0] if entry else None
-
 
 # ---------- per-site parsers ----------
 
@@ -976,3 +1012,312 @@ def _extract_mvideo_location(text: str) -> str | None:
         if city in text:
             return city
     return None
+
+# ════════════════════════════════════════════════════════════════════
+# Universal ATS fetchers
+# ════════════════════════════════════════════════════════════════════
+
+async def _fetch_greenhouse(company_slug: str, company_name: str) -> list[Vacancy]:
+    """Универсальный фетчер для Greenhouse ATS через публичный JSON API.
+    
+    Покрывает сотни компаний: Anthropic, Stripe, Notion, Linear, Figma,
+    Mercury, Plaid, Datadog, Duolingo, Coursera и так далее.
+    """
+    api_url = f"https://boards-api.greenhouse.io/v1/boards/{company_slug}/jobs?content=true"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.get(api_url, headers={"User-Agent": USER_AGENT})
+            if response.status_code != 200:
+                return []
+            data = response.json()
+        except (httpx.HTTPError, ValueError):
+            return []
+
+    vacancies: list[Vacancy] = []
+    for job in data.get("jobs", []):
+        job_id = str(job.get("id", ""))
+        if not job_id:
+            continue
+
+        title = job.get("title", "").strip()
+        location = (job.get("location") or {}).get("name", "").strip() or None
+        url = job.get("absolute_url", "").strip()
+        if not title or not url:
+            continue
+
+        # Description: HTML с тегами, надо очистить через BS4
+        content_html = job.get("content", "")
+        if content_html:
+            content_soup = BeautifulSoup(content_html, "html.parser")
+            description = content_soup.get_text(" ", strip=True)[:2500]
+        else:
+            description = title
+
+        departments = job.get("departments") or []
+        dept_names = ", ".join(d.get("name", "") for d in departments if d.get("name"))
+        if dept_names:
+            description = f"Отдел: {dept_names}\n{description}"
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"greenhouse_{company_slug}:{job_id}",
+                source_type=SourceType.career_site,
+                title=title[:200],
+                company=company_name,
+                url=url,
+                description=description,
+                salary=None,
+                location=location,
+                published_at=job.get("updated_at"),
+                raw={"site": f"greenhouse_{company_slug}", "departments": dept_names},
+            )
+        )
+    return vacancies
+
+
+async def _fetch_teamtailor(url: str, company_name: str, site_id: str) -> list[Vacancy]:
+    """Универсальный фетчер для Teamtailor ATS через парсинг HTML.
+    
+    Покрывает Sumsub и другие компании на Teamtailor.
+    Структура: <a href="/jobs/{id}-{slug}">Title Category · Location · WorkMode</a>
+    """
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        try:
+            response = await client.get(url, headers={"User-Agent": USER_AGENT})
+            if response.status_code != 200:
+                return []
+            html = response.text
+        except httpx.HTTPError:
+            return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    link_pattern = re.compile(r"/jobs/(\d+)-([a-z0-9\-]+)/?$")
+
+    for link in soup.find_all("a", href=link_pattern):
+        href = link.get("href", "")
+        text = link.get_text(" ", strip=True)
+        if not text or len(text) < 5:
+            continue
+
+        match = link_pattern.search(href)
+        if not match:
+            continue
+        job_id = match.group(1)
+        if job_id in seen_ids:
+            continue
+        seen_ids.add(job_id)
+
+        full_url = href if href.startswith("http") else f"https://careers.{site_id}.com{href}"
+
+        # Структура: "Title Category · Location · WorkMode"
+        # Разрезаем по " · " как разделителю
+        parts = [p.strip() for p in text.split("·")]
+        title_with_category = parts[0] if parts else text
+        location = parts[1].strip() if len(parts) > 1 else None
+        work_mode = parts[2].strip() if len(parts) > 2 else None
+
+        # Title и категория слиплись — разрезаем по последнему пробелу перед известными категориями
+        categories = [
+            "Sales", "Technical", "Product", "Analytics", "Marketing",
+            "Human Resources", "Legal", "Customer Operations", "Operations",
+            "Engineering", "Design", "Finance", "Video Ident",
+        ]
+        title = title_with_category
+        category = None
+        for cat in sorted(categories, key=len, reverse=True):
+            if title_with_category.endswith(cat):
+                title = title_with_category[: -len(cat)].strip()
+                category = cat
+                break
+
+        final_location = None
+        if location and work_mode:
+            final_location = f"{location}, {work_mode}"
+        elif location:
+            final_location = location
+        elif work_mode:
+            final_location = work_mode
+
+        description_parts = [title]
+        if category:
+            description_parts.append(f"Категория: {category}")
+        if final_location:
+            description_parts.append(f"Локация: {final_location}")
+        description = "\n".join(description_parts)
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"teamtailor_{site_id}:{job_id}",
+                source_type=SourceType.career_site,
+                title=title[:200] or "Position",
+                company=company_name,
+                url=full_url,
+                description=description,
+                salary=None,
+                location=final_location,
+                published_at=None,
+                raw={"site": f"teamtailor_{site_id}", "category": category},
+            )
+        )
+    return vacancies
+
+
+# ════════════════════════════════════════════════════════════════════
+# Custom HTML parsers — Zalando + Lesta
+# ════════════════════════════════════════════════════════════════════
+
+def _parse_zalando(html: str, base_url: str) -> list[Vacancy]:
+    """Парсер для jobs.zalando.com/en/jobs.
+    
+    Структура: <a href="/en/jobs/{id}-{slug}">TitleCategoryView jobLocationView job</a>
+    Слова "View job" дублируются, надо вырезать.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    link_pattern = re.compile(r"^/en/jobs/(\d+)-(.+)$")
+
+    categories = [
+        "Applied Science & Research", "Business Development & Strategy",
+        "Customer Care", "Finance, Analytics & Controlling",
+        "IT Consulting & Operations", "Logistics & Supply Chain",
+        "Maintenance & Facility", "People & Organization",
+        "Product Management", "Retail", "Backend", "Frontend",
+    ]
+
+    for link in soup.find_all("a", href=link_pattern):
+        href = link.get("href", "")
+        text = link.get_text(" ", strip=True)
+        if not text:
+            continue
+
+        match = link_pattern.match(href)
+        if not match:
+            continue
+        job_id = match.group(1)
+        if job_id in seen_ids:
+            continue
+        seen_ids.add(job_id)
+
+        # Чистим повторы "View job"
+        text = re.sub(r"\s*View job\s*", " ", text).strip()
+
+        # Категория обычно в конце title-куска
+        category = None
+        title = text
+        for cat in sorted(categories, key=len, reverse=True):
+            if cat in text:
+                category = cat
+                # Разделяем text на title и хвост
+                idx = text.find(cat)
+                title = text[:idx].strip()
+                rest = text[idx + len(cat):].strip()
+                location = rest if rest else None
+                break
+        else:
+            location = None
+
+        # Если категории не нашли, ищем известные города
+        if not location:
+            for city in ["Berlin", "Moenchengladbach", "Giessen", "Lahr", "Helsinki", "Dublin", "Remote Work", "Ansbach"]:
+                if city in text:
+                    location = city
+                    title = text.split(city)[0].strip()
+                    break
+
+        full_url = f"https://jobs.zalando.com{href}"
+
+        description_parts = [title]
+        if category:
+            description_parts.append(f"Category: {category}")
+        if location:
+            description_parts.append(f"Location: {location}")
+        description = "\n".join(description_parts)
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"zalando:{job_id}",
+                source_type=SourceType.career_site,
+                title=title[:200] or "Position",
+                company="Zalando",
+                url=full_url,
+                description=description,
+                salary=None,
+                location=location,
+                published_at=None,
+                raw={"site": "zalando", "category": category},
+            )
+        )
+    return vacancies
+
+
+def _parse_lesta(html: str, base_url: str) -> list[Vacancy]:
+    """Парсер для join.lesta.team."""
+    soup = BeautifulSoup(html, "html.parser")
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    link_pattern = re.compile(r"^/vacancy/([a-z0-9\-]+)/(\d+)/?$")
+
+    projects = ["Tanks Blitz", "Мир кораблей", "Мир танков", "General"]
+    categories = [
+        "Game Design", "Dev", "QA", "Art", "Animation&VFX", "BI",
+        "Marketing", "Administration", "Infrastructure", "Management",
+        "Support", "Video", "UI/UX", "General", "HR", "Legal",
+    ]
+    cities = ["Москва", "Минск", "Санкт-Петербург"]
+
+    for link in soup.find_all("a", href=link_pattern):
+        href = link.get("href", "")
+        text = link.get_text(" ", strip=True)
+        if not text:
+            continue
+
+        match = link_pattern.match(href)
+        if not match:
+            continue
+        job_id = match.group(2)
+        if job_id in seen_ids:
+            continue
+        seen_ids.add(job_id)
+
+        # Текст вида: "Title Category project icon Project City м. Метро"
+        category = next((c for c in categories if c in text), None)
+        project = next((p for p in projects if p in text), None)
+        city = next((c for c in cities if c in text), None)
+
+        # Title — всё до первой найденной категории
+        title = text
+        if category and category in text:
+            title = text.split(category)[0].strip()
+
+        full_url = f"https://join.lesta.team{href}"
+
+        description_parts = [title]
+        if category:
+            description_parts.append(f"Категория: {category}")
+        if project:
+            description_parts.append(f"Проект: {project}")
+        if city:
+            description_parts.append(f"Локация: {city}")
+        description = "\n".join(description_parts)
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"lesta:{job_id}",
+                source_type=SourceType.career_site,
+                title=title[:200] or "Вакансия",
+                company="Lesta Games",
+                url=full_url,
+                description=description,
+                salary=None,
+                location=city,
+                published_at=None,
+                raw={"site": "lesta", "category": category, "project": project},
+            )
+        )
+    return vacancies
