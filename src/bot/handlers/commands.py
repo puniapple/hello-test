@@ -144,12 +144,13 @@ async def cmd_show_profile(message: Message) -> None:
         if not value:
             continue
         if isinstance(value, list):
-            display = ", ".join(str(v) for v in value)
+            display = ", ".join(str(v).strip() for v in value if str(v).strip())
         else:
-            display = str(value)
+            # Строка — отображаем как есть, без лишней манипуляции
+            display = str(value).strip().lstrip(",").strip()
         if len(display) > 300:
             display = display[:300] + "…"
-        parts.append(f",<b>{label}</b>: {_escape_html(display)}")
+        parts.append(f"<b>{label}</b>: {_escape_html(display)}")
 
     # Локация и формат отдельно
     lp = pd.get("location_preferences")

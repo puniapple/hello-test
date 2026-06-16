@@ -39,7 +39,11 @@ PROFILE_AGENT_TOOLS = [
                     ],
                 },
                 "value": {
-                    "description": "Новое значение поля. Тип зависит от поля: строка, список строк или объект.",
+                    # ВАЖНО: разрешаем оба типа — массив для списков, строка для строковых полей
+                    "description": (
+                        "Значение поля. Массив строк для списочных полей "
+                        "(target_roles, anti_roles, expertise, industries_*, must_haves, deal_breakers, languages, format). "
+                        "Строка для текстовых полей. Dict для compensation и location_preferences.")
                 },
             },
             "required": ["field", "value"],

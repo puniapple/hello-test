@@ -27,6 +27,30 @@ from src.services.claude import (
     build_tool_result_block,
 )
 
+import re
+
+LIST_FIELDS = {
+    "target_roles", "anti_roles", "expertise",
+    "industries_interested", "industries_avoid",
+    "must_haves", "deal_breakers", "languages", "format",
+}
+
+
+def _normalize_profile_value(field: str, value):
+    """Приводит value к ожидаемому типу для конкретного поля.
+    
+    Claude иногда передаёт строку с запятыми вместо массива — нормализуем.
+    """
+    if field in LIST_FIELDS:
+        if isinstance(value, list):
+            return [str(v).strip() for v in value if str(v).strip()]
+        if isinstance(value, str):
+            # Разрезаем по запятой или слешу
+            parts = re.split(r"[,/]|\s+\|\s+", value)
+            return [p.strip() for p in parts if p.strip()]
+        return []
+    return value
+
 MAX_HISTORY_MESSAGES = 20
 MAX_TOOL_ITERATIONS = 10
 
@@ -182,7 +206,7 @@ class ProfileAgent:
             value = tool_input["value"]
             profile = await self._get_profile(session, user_id)
             data = dict(profile.profile_data or {})
-            data[field] = value
+            data[field] = _normalize_profile_value(field, value)
             profile.profile_data = data
             await session.flush()
             return f"Поле '{field}' обновлено.", False, None
