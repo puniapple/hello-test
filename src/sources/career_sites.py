@@ -34,6 +34,7 @@ def _registry() -> dict[str, tuple[str, str, ParserFn]]:
         "vk_company": ("VK Company", "https://team.vk.company/vacancy/", _parse_vk_company),
         "yandex": ("Яндекс", "https://yandex.ru/jobs/vacancies", _parse_yandex),
         "logika_moloka": ("Логика Молока", "https://career.logikamoloka.ru/vacancies/", _parse_logika_moloka),
+        "mvideo": ("М.Видео", "https://career.mvideoeldorado.ru/vacancies/", _parse_mvideo),
     }
 
 
@@ -828,3 +829,150 @@ def _parse_logika_moloka(html: str, base_url: str) -> list[Vacancy]:
         )
 
     return vacancies
+
+def _parse_mvideo(html: str, base_url: str) -> list[Vacancy]:
+    """Парсер для career.mvideoeldorado.ru/vacancies.
+
+    Каждая вакансия — одна ссылка, текст слепленный из 4-5 частей без разделителей:
+    адрес (длинный), название должности, дата ("DD месяц"), категория, зарплата (опционально).
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    link_pattern = re.compile(r"^/vacancies/([a-f0-9]{20,})/?$")
+
+    categories = ["Магазин", "Склад и Логистика", "Офис", "Колл-центр", "ИТ", "Стажировка"]
+    date_pattern = re.compile(
+        r"(\d{1,2})\s*(январ|феврал|март|апрел|мая|май|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*",
+        re.IGNORECASE,
+    )
+    salary_pattern = re.compile(r"(\d{2,3}\s?\d{3})\s*[₽$€]")
+
+    for link in soup.find_all("a", href=link_pattern):
+        href = link.get("href", "")
+        match = link_pattern.match(href)
+        if not match:
+            continue
+        vacancy_id = match.group(1)
+        if vacancy_id in seen_ids:
+            continue
+        seen_ids.add(vacancy_id)
+
+        text = link.get_text(" ", strip=True)
+        if not text or len(text) < 20:
+            continue
+
+        external_id = f"mvideo:{vacancy_id}"
+        full_url = f"https://career.mvideoeldorado.ru{href}"
+
+        # Зарплата
+        salary_match = salary_pattern.search(text)
+        salary = salary_match.group(0).strip() if salary_match else None
+
+        # Категория — находим один из известных вариантов
+        category = next((c for c in categories if c in text), None)
+
+        # Дата вакансии — отсекаем как маркер, отделяющий title от категории
+        date_match = date_pattern.search(text)
+
+        # Сначала отрезаем всё ПОСЛЕ даты — там обычно категория и зарплата.
+        # ДО даты живут адрес + название должности.
+        if date_match:
+            before_date = text[: date_match.start()].strip()
+        else:
+            # Fallback: режем по категории
+            if category and category in text:
+                before_date = text.split(category)[0].strip()
+            else:
+                before_date = text
+
+        # Адрес кончается там, где начинается название должности.
+        # Эвристика: адрес содержит цифры, индекс, "ул.", "д.", "стр.", "пр-кт",
+        # а название должности — нет. Идём с конца и отрезаем последнее
+        # слитное слово, которое выглядит как должность.
+        title = _extract_mvideo_title(before_date)
+
+        # Локация — упрощённо: первый город из адреса, иначе сам адрес покороче
+        location = _extract_mvideo_location(before_date.replace(title, "").strip())
+
+        description_parts = [title]
+        if category:
+            description_parts.append(f"Категория: {category}")
+        if location:
+            description_parts.append(f"Адрес: {location}")
+        if salary:
+            description_parts.append(f"Зарплата: {salary}")
+        description = "\n".join(description_parts)
+
+        vacancies.append(
+            Vacancy(
+                external_id=external_id,
+                source_type=SourceType.career_site,
+                title=title[:200] or "Вакансия",
+                company="М.Видео",
+                url=full_url,
+                description=description,
+                salary=salary,
+                location=location,
+                published_at=None,
+                raw={"site": "mvideo", "category": category, "raw_text": text},
+            )
+        )
+
+    return vacancies
+
+
+def _extract_mvideo_title(text: str) -> str:
+    """Из 'адрес + название должности' извлекаем только название.
+
+    Эвристика: разрезаем по концу адреса. Признаки конца адреса:
+    запятая+пробел+заглавная буква, последний номер дома/строения,
+    либо явный переход адресной части в нормальный текст.
+    """
+    # Если в строке есть "стр.X" или "д.X" — берём всё после последнего такого блока
+    addr_markers = re.finditer(
+        r"(?:стр\.?\s*\d+[а-я]?|д\.?\s*\d+[а-я]?|вл\.?\s*\d+[а-я]?|зд\.?\s*\d+[а-я]?|корп\.?\s*\d+[а-я]?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    last_end = 0
+    for m in addr_markers:
+        last_end = m.end()
+    if last_end:
+        candidate = text[last_end:].strip(" ,.")
+        if 5 < len(candidate) < 200:
+            return candidate
+
+    # Fallback: ищем после индекса (6 цифр) первое значимое слово
+    zip_match = re.search(r"\b\d{6}\b", text)
+    if zip_match:
+        # Берём всё после индекса, чистим от запятых
+        candidate = text[zip_match.end():].strip(" ,.")
+        # Внутри ещё может быть адрес — режем по последнему числу с буквой/точкой
+        # Простой fallback: если строка длинная, берём последние 5-12 слов
+        words = candidate.split()
+        if len(words) > 4:
+            candidate = " ".join(words[-min(len(words), 8):])
+        if 5 < len(candidate) < 200:
+            return candidate
+
+    # Совсем fallback: берём последние 60-80 символов
+    if len(text) > 80:
+        return text[-80:].strip(" ,.")
+    return text.strip(" ,.")
+
+
+def _extract_mvideo_location(text: str) -> str | None:
+    """Из адреса вычленяем город."""
+    cities = [
+        "Москва", "Санкт-Петербург", "Екатеринбург", "Казань", "Новосибирск",
+        "Хабаровск", "Ярославль", "Владивосток", "Краснодар", "Самара",
+        "Череповец", "Смоленск", "Подольск", "Саратов", "Кемерово",
+        "Набережные Челны", "Чехов", "Лаишевский", "Бийск", "Курчатов",
+        "Пенза", "Тюмень", "Иркутск", "Воронеж", "Барнаул", "Калининград",
+    ]
+    for city in cities:
+        if city in text:
+            return city
+    return None
