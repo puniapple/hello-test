@@ -287,3 +287,150 @@ async def cmd_stats(message: Message) -> None:
         f"👎 не моё: {disliked}\n"
         f"⏳ без реакции: {no_reaction}"
     )
+
+# ════════════════════════════════════════════════════════════════════
+# Admin commands (limited to ADMIN_TELEGRAM_IDS)
+# ════════════════════════════════════════════════════════════════════
+
+def _is_admin(telegram_id: int) -> bool:
+    """Проверка по env-переменной ADMIN_TELEGRAM_IDS."""
+    if not settings.admin_telegram_ids:
+        return False
+    ids = {
+        int(x.strip()) for x in settings.admin_telegram_ids.split(",") if x.strip()
+    }
+    return telegram_id in ids
+
+
+@router.message(Command("admin_users"))
+async def cmd_admin_users(message: Message) -> None:
+    """Обзор всех юзеров со статистикой и краткой выжимкой профиля."""
+    if not _is_admin(message.from_user.id):
+        return  # молча игнорируем — не палим существование команды
+
+    from src.db.models import VacancyMatch
+
+    async with async_session() as session:
+        users = (await session.execute(select(User))).scalars().all()
+
+        if not users:
+            await message.answer("Юзеров пока нет.")
+            return
+
+        chunks: list[str] = []
+        header = f"📊 Всего юзеров: {len(users)}"
+        current = header + "\n\n"
+
+        for user in users:
+            profile = (await session.execute(
+                select(Profile).where(Profile.user_id == user.id)
+            )).scalar_one_or_none()
+
+            matches = (await session.execute(
+                select(VacancyMatch).where(VacancyMatch.user_id == user.id)
+            )).scalars().all()
+
+            total = len(matches)
+            liked = sum(1 for m in matches if m.user_reaction == UserReaction.liked)
+            disliked = sum(1 for m in matches if m.user_reaction == UserReaction.disliked)
+            applied = sum(1 for m in matches if m.user_reaction == UserReaction.applied)
+            avg_score = (sum(m.match_score for m in matches) / total) if total else 0
+
+            profile_summary = "пусто"
+            if profile and profile.profile_data:
+                pd = profile.profile_data
+                bits = []
+                if pd.get("seniority"):
+                    bits.append(f"уровень: {pd['seniority']}")
+                if pd.get("target_roles"):
+                    roles = ", ".join(pd["target_roles"][:2])
+                    bits.append(f"роли: {roles[:80]}")
+                if pd.get("industries_interested"):
+                    industries = ", ".join(pd["industries_interested"][:3])
+                    bits.append(f"индустрии: {industries[:80]}")
+                if pd.get("location_preferences"):
+                    lp = pd["location_preferences"]
+                    if isinstance(lp, dict):
+                        cities = lp.get("cities", [])
+                        if cities:
+                            bits.append(f"локации: {', '.join(cities[:3])}")
+                if bits:
+                    profile_summary = " | ".join(bits)
+
+            username = f"@{user.telegram_username}" if user.telegram_username else "—"
+            state_value = user.state.value if user.state else "idle"
+            state_emoji = {
+                "idle": "✅", "paused": "⏸", "editing_profile": "✏️"
+            }.get(state_value, "❓")
+
+            block = (
+                f"{state_emoji} {username} (id: {user.telegram_id})\n"
+                f"   Профиль: {profile_summary}\n"
+                f"   Доставлено: {total}, средн. score: {avg_score:.1f}\n"
+                f"   👍 {liked}  👎 {disliked}  📨 {applied}\n\n"
+            )
+
+            # Telegram limit ~4096 — режем сообщение
+            if len(current) + len(block) > 3800:
+                chunks.append(current)
+                current = block
+            else:
+                current += block
+
+        if current.strip():
+            chunks.append(current)
+
+        for chunk in chunks:
+            await message.answer(chunk)
+
+
+@router.message(Command("admin_profile"))
+async def cmd_admin_profile(message: Message) -> None:
+    """Полный профиль конкретного юзера. Использование: /admin_profile <telegram_id>"""
+    if not _is_admin(message.from_user.id):
+        return
+
+    import json
+
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("Использование: /admin_profile <telegram_id>")
+        return
+
+    try:
+        target_id = int(parts[1].strip())
+    except ValueError:
+        await message.answer("telegram_id должен быть числом.")
+        return
+
+    async with async_session() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == target_id)
+        )).scalar_one_or_none()
+        if user is None:
+            await message.answer(f"Юзер с id {target_id} не найден.")
+            return
+
+        profile = (await session.execute(
+            select(Profile).where(Profile.user_id == user.id)
+        )).scalar_one_or_none()
+
+    if profile is None or not profile.profile_data:
+        await message.answer(f"У юзера {target_id} пустой профиль.")
+        return
+
+    username = f"@{user.telegram_username}" if user.telegram_username else "—"
+    header = f"👤 {username} (id: {target_id})\n\n"
+
+    # Pretty JSON, обрезаем под лимит сообщения
+    pretty = json.dumps(profile.profile_data, ensure_ascii=False, indent=2)
+    body = header + f"```json\n{pretty}\n```"
+
+    # Telegram лимит ~4096, режем под 3900
+    if len(body) > 3900:
+        # Без markdown, просто текстом — чтобы не сломать форматирование при разрезании
+        plain = header + pretty
+        for i in range(0, len(plain), 3900):
+            await message.answer(plain[i : i + 3900])
+    else:
+        await message.answer(body, parse_mode="Markdown")

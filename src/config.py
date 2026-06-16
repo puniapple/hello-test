@@ -20,5 +20,7 @@ class Settings(BaseSettings):
     environment: str = Field(default="dev")
     log_level: str = Field(default="INFO")
 
+    admin_telegram_ids: str = ""  # comma-separated list of admin Telegram IDs
+
 
 settings = Settings()
