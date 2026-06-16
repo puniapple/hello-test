@@ -531,7 +531,6 @@ async def cmd_admin_profile(message: Message) -> None:
     header = f"👤 {html_module.escape(username)} (id: {target_id})\n\n"
 
     # Pretty JSON, обрезаем под лимит сообщения
-    import html as html_module
 
     pretty = json.dumps(profile.profile_data, ensure_ascii=False, indent=2)
     escaped = html_module.escape(pretty)
