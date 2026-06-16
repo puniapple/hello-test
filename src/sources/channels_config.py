@@ -21,4 +21,7 @@ TELEGRAM_CHANNELS: list[str] = [
     "communication_department",
     # С прозрачными контактами работодателей
     "bezaspera",
+    # Карьерные каналы крупных компаний
+    "vkjobs",
+    "alfabank_career",
 ]
