@@ -33,6 +33,7 @@ def _registry() -> dict[str, tuple[str, str, ParserFn]]:
         "avito": ("Avito", "https://career.avito.com/vacancies/", _parse_avito),
         "vk_company": ("VK Company", "https://team.vk.company/vacancy/", _parse_vk_company),
         "yandex": ("Яндекс", "https://yandex.ru/jobs/vacancies", _parse_yandex),
+        "logika_moloka": ("Логика Молока", "https://career.logikamoloka.ru/vacancies/", _parse_logika_moloka),
     }
 
 
@@ -736,6 +737,93 @@ def _parse_yandex(html: str, base_url: str) -> list[Vacancy]:
                 location=final_location,
                 published_at=None,
                 raw={"site": "yandex", "service": service, "slug": slug},
+            )
+        )
+
+    return vacancies
+
+def _parse_logika_moloka(html: str, base_url: str) -> list[Vacancy]:
+    """Парсер для career.logikamoloka.ru/vacancies/.
+
+    Структура: <a href="/vacancies/{slug}-{id}/"> с двумя соседними блоками —
+    локация (один из городов) и название должности.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    link_pattern = re.compile(r"^/vacancies/([a-z0-9_\-]+?)-(\d+)/?$")
+
+    for link in soup.find_all("a", href=link_pattern):
+        href = link.get("href", "")
+        match = link_pattern.match(href)
+        if not match:
+            continue
+        slug, vacancy_id = match.group(1), match.group(2)
+        if vacancy_id in seen_ids:
+            continue
+        seen_ids.add(vacancy_id)
+
+        external_id = f"logika_moloka:{vacancy_id}"
+        full_url = f"https://career.logikamoloka.ru{href}"
+
+        # Поднимаемся к контейнеру вакансии — у Логики структура простая,
+        # обычно достаточно подняться на 1-2 уровня
+        card = link.parent
+        for _ in range(3):
+            if card is None:
+                break
+            text_len = len(card.get_text(" ", strip=True))
+            if text_len > 30:
+                break
+            card = card.parent
+        if card is None:
+            continue
+
+        full_text = card.get_text(" | ", strip=True)
+        lines = [
+            l.strip()
+            for l in card.get_text("\n", strip=True).split("\n")
+            if l.strip() and l.strip().lower() != "откликнуться"
+        ]
+
+        # Город — отдельная короткая строка из известного списка
+        cities = [
+            "Москва", "Санкт-Петербург", "Кемерово", "Ялуторовск",
+            "Липецк", "Самара", "Сургут", "Краснодар", "Екатеринбург",
+            "Новосибирск", "Воронеж", "Нижний Новгород", "Казань",
+            "Уфа", "Тюмень", "Челябинск", "Пермь", "Омск", "Ростов-на-Дону",
+            "Ижевск", "Калининград", "Ярославль",
+        ]
+        location = next((c for c in cities if c in full_text), None)
+
+        # Title — обычно строка длиной 10-100 символов, не город, не дата
+        date_pattern = re.compile(
+            r"\d{1,2}\s+(?:янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)",
+            re.IGNORECASE,
+        )
+        title_candidates = []
+        for line in lines:
+            if location and line == location:
+                continue
+            if date_pattern.search(line):
+                continue
+            if 10 < len(line) < 200:
+                title_candidates.append(line)
+        title = title_candidates[0] if title_candidates else "Вакансия"
+
+        vacancies.append(
+            Vacancy(
+                external_id=external_id,
+                source_type=SourceType.career_site,
+                title=title[:200],
+                company="Логика Молока",
+                url=full_url,
+                description=full_text,
+                salary=None,
+                location=location,
+                published_at=None,
+                raw={"site": "logika_moloka", "slug": slug},
             )
         )
 
