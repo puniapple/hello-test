@@ -87,6 +87,14 @@ async def cmd_help(message: Message) -> None:
 async def cmd_show_profile(message: Message) -> None:
     """Показать текущее состояние профиля, даже если он не закрыт."""
     import json
+    def _escape_md(text: str) -> str:
+        """Экранирует спецсимволы Markdown legacy в значениях полей."""
+        if not text:
+            return ""
+        # В legacy Markdown эскейпятся только эти 4 символа
+        for ch in ("_", "*", "`", "["):
+            text = text.replace(ch, "\\" + ch)
+        return text
 
     async with async_session() as session:
         user = (await session.execute(
@@ -138,7 +146,7 @@ async def cmd_show_profile(message: Message) -> None:
             display = str(value)
         if len(display) > 300:
             display = display[:300] + "…"
-        parts.append(f"**{label}**: {display}")
+        parts.append(f"**{label}**: {_escape_md(display)}")
 
     # Локация и формат отдельно
     lp = pd.get("location_preferences")
@@ -151,11 +159,11 @@ async def cmd_show_profile(message: Message) -> None:
         if lp.get("remote_ok"):
             loc_bits.append("remote ok")
         if loc_bits:
-            parts.append(f"**Локация**: {' | '.join(loc_bits)}")
+            parts.append(f"**Локация**: {_escape_md(' | '.join(loc_bits))}")
 
     fmt = pd.get("format")
     if fmt:
-        parts.append(f"**Формат**: {', '.join(fmt) if isinstance(fmt, list) else fmt}")
+        parts.append(f"**Формат**: {_escape_md(', '.join(fmt) if isinstance(fmt, list) else fmt)}")
 
     comp = pd.get("compensation")
     if isinstance(comp, dict):
@@ -167,7 +175,7 @@ async def cmd_show_profile(message: Message) -> None:
         if comp.get("currency"):
             comp_bits.append(comp["currency"])
         if comp_bits:
-            parts.append(f"**Деньги**: {' '.join(comp_bits)}")
+            parts.append(f"**Деньги**: {_escape_md(' '.join(comp_bits))}")
 
     # CV
     cv_sources = pd.get("cv_sources") or []
@@ -517,13 +525,17 @@ async def cmd_admin_profile(message: Message) -> None:
 
     # Pretty JSON, обрезаем под лимит сообщения
     pretty = json.dumps(profile.profile_data, ensure_ascii=False, indent=2)
-    body = header + f"```json\n{pretty}\n```"
+    # Экранируем для безопасной отправки в Markdown
+    pretty_escaped = pretty
+    for ch in ("_", "*", "`", "["):
+        pretty_escaped = pretty_escaped.replace(ch, "\\" + ch)
 
-    # Telegram лимит ~4096, режем под 3900
+    body = header + f"```\n{pretty}\n```"  # внутри ``` блока экранировать НЕ надо
+
     if len(body) > 3900:
-        # Без markdown, просто текстом — чтобы не сломать форматирование при разрезании
-        plain = header + pretty
+        # Если длинно — без кодоблока, чанками с экраном
+        plain = header + pretty_escaped
         for i in range(0, len(plain), 3900):
-            await message.answer(plain[i : i + 3900])
+            await message.answer(plain[i : i + 3900], parse_mode="Markdown")
     else:
         await message.answer(body, parse_mode="Markdown")
