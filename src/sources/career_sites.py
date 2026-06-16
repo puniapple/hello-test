@@ -31,6 +31,7 @@ def _registry() -> dict[str, tuple[str, str, ParserFn]]:
         "garage_eight": ("Garage Eight", "https://garage-eight.com/vacancies/", _parse_garage_eight),
         "uzum": ("Uzum", "https://people.uzum.com/career/ru/vacancies", _parse_uzum),
         "avito": ("Avito", "https://career.avito.com/vacancies/", _parse_avito),
+        "vk_company": ("VK Company", "https://team.vk.company/vacancy/", _parse_vk_company),
     }
 
 
@@ -506,3 +507,105 @@ def _extract_avito_meta(link_tag) -> tuple[str | None, str | None, str | None]:
         team = None
 
     return location, work_format, team
+
+def _parse_vk_company(html: str, base_url: str) -> list[Vacancy]:
+    """Парсер для team.vk.company/vacancy/.
+
+    Структура: <a href="/vacancy/XXXXX/">Title Team CityFormat</a>
+    Текст слипшийся (CamelCase разделения нет), приходится резать эвристиками.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    link_pattern = re.compile(r"^/vacancy/(\d+)/?$")
+
+    # Известные форматы работы — конец строки
+    formats = [
+        "офисный", "гибкий", "комбинированный", "удалённый", "удаленный",
+        "разъездной", "дистанционный",
+    ]
+    # Известные города — перед форматом
+    cities = [
+        "Москва", "Санкт-Петербург", "Астана", "Волгоград",
+        "Алматы", "Минск", "Сочи", "Казань",
+    ]
+
+    for link in soup.find_all("a", href=link_pattern):
+        href = link.get("href", "")
+        text = link.get_text(" ", strip=True)
+        if not text or len(text) < 5:
+            continue
+
+        match = link_pattern.match(href)
+        if not match:
+            continue
+        vacancy_id = match.group(1)
+        if vacancy_id in seen_ids:
+            continue
+        seen_ids.add(vacancy_id)
+
+        external_id = f"vk_company:{vacancy_id}"
+        full_url = f"https://team.vk.company{href}"
+
+        # Извлекаем формат — обычно после запятой в конце
+        work_format = None
+        text_for_title = text
+        for fmt in formats:
+            if text.lower().endswith(fmt):
+                work_format = fmt
+                text_for_title = text[: -len(fmt)].rstrip(", ").strip()
+                break
+
+        # Извлекаем город перед форматом
+        location = None
+        for city in cities:
+            # Город обычно идёт через запятую перед форматом
+            pattern = re.compile(rf"\b{re.escape(city)}\b")
+            city_match = pattern.search(text_for_title)
+            if city_match:
+                location = city
+                text_for_title = text_for_title[: city_match.start()].rstrip(", ").strip()
+                break
+
+        # Что осталось — title + команда (CamelCase, слипшиеся)
+        # Команда обычно с заглавной буквы после первой строчной
+        # Разделяем по переходу строчная→Заглавная
+        parts = re.split(r"(?<=[а-яa-z])(?=[А-ЯA-Z])", text_for_title, maxsplit=1)
+        title = parts[0].strip() if parts else text_for_title
+        team = parts[1].strip() if len(parts) > 1 else None
+
+        # Финальная локация — комбинация города и формата
+        final_location = None
+        if location and work_format:
+            final_location = f"{location}, {work_format}"
+        elif location:
+            final_location = location
+        elif work_format:
+            final_location = work_format
+
+        # Description: соберём всё что есть для матчера
+        description_parts = [title]
+        if team:
+            description_parts.append(f"Команда: {team}")
+        if final_location:
+            description_parts.append(f"Локация: {final_location}")
+        description = "\n".join(description_parts)
+
+        vacancies.append(
+            Vacancy(
+                external_id=external_id,
+                source_type=SourceType.career_site,
+                title=title[:200] or "Вакансия",
+                company="VK Company",
+                url=full_url,
+                description=description,
+                salary=None,
+                location=final_location,
+                published_at=None,
+                raw={"site": "vk_company", "team": team},
+            )
+        )
+
+    return vacancies
+
