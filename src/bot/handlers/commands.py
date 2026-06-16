@@ -1,6 +1,7 @@
 """Bot command handlers."""
 
 import asyncio
+import html as html_module
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
@@ -87,14 +88,16 @@ async def cmd_help(message: Message) -> None:
 async def cmd_show_profile(message: Message) -> None:
     """Показать текущее состояние профиля, даже если он не закрыт."""
     import json
-    def _escape_md(text: str) -> str:
-        """Экранирует спецсимволы Markdown legacy в значениях полей."""
+    def _escape_html(text: str) -> str:
+        """Экранирует HTML спецсимволы."""
         if not text:
             return ""
-        # В legacy Markdown эскейпятся только эти 4 символа
-        for ch in ("_", "*", "`", "["):
-            text = text.replace(ch, "\\" + ch)
-        return text
+        return (
+            str(text)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
 
     async with async_session() as session:
         user = (await session.execute(
@@ -146,7 +149,7 @@ async def cmd_show_profile(message: Message) -> None:
             display = str(value)
         if len(display) > 300:
             display = display[:300] + "…"
-        parts.append(f"**{label}**: {_escape_md(display)}")
+        parts.append(f",<b>{label}</b>: {_escape_html(display)}")
 
     # Локация и формат отдельно
     lp = pd.get("location_preferences")
@@ -159,11 +162,11 @@ async def cmd_show_profile(message: Message) -> None:
         if lp.get("remote_ok"):
             loc_bits.append("remote ok")
         if loc_bits:
-            parts.append(f"**Локация**: {_escape_md(' | '.join(loc_bits))}")
+            parts.append(f"<b>Локация</b>: {_escape_html(' | '.join(loc_bits))}")
 
     fmt = pd.get("format")
     if fmt:
-        parts.append(f"**Формат**: {_escape_md(', '.join(fmt) if isinstance(fmt, list) else fmt)}")
+        parts.append(f"<b>Формат</b>: {_escape_html(', '.join(fmt) if isinstance(fmt, list) else fmt)}")
 
     comp = pd.get("compensation")
     if isinstance(comp, dict):
@@ -175,12 +178,12 @@ async def cmd_show_profile(message: Message) -> None:
         if comp.get("currency"):
             comp_bits.append(comp["currency"])
         if comp_bits:
-            parts.append(f"**Деньги**: {_escape_md(' '.join(comp_bits))}")
+            parts.append(f"<b>Деньги</b>: {_escape_html(' '.join(comp_bits))}")
 
     # CV
     cv_sources = pd.get("cv_sources") or []
     if cv_sources:
-        parts.append(f"**Резюме**: загружено ({len(cv_sources)} файл(а/ов))")
+        parts.append(f"<b>Резюме</b>: загружено ({len(cv_sources)} файл(а/ов))")
 
     parts.append("")
     parts.append("Хочешь дополнить — /edit_profile.")
@@ -191,7 +194,7 @@ async def cmd_show_profile(message: Message) -> None:
     if len(text) > 3900:
         text = text[:3900] + "…"
 
-    await message.answer(text, parse_mode="Markdown")
+    await message.answer(text, parse_mode="HTML")
 
 @router.message(Command("edit_profile"))
 async def cmd_edit_profile(message: Message) -> None:
@@ -521,21 +524,25 @@ async def cmd_admin_profile(message: Message) -> None:
         return
 
     username = f"@{user.telegram_username}" if user.telegram_username else "—"
-    header = f"👤 {username} (id: {target_id})\n\n"
+    header = f"👤 {html_module.escape(username)} (id: {target_id})\n\n"
 
     # Pretty JSON, обрезаем под лимит сообщения
-    pretty = json.dumps(profile.profile_data, ensure_ascii=False, indent=2)
-    # Экранируем для безопасной отправки в Markdown
-    pretty_escaped = pretty
-    for ch in ("_", "*", "`", "["):
-        pretty_escaped = pretty_escaped.replace(ch, "\\" + ch)
+    import html as html_module
 
-    body = header + f"```\n{pretty}\n```"  # внутри ``` блока экранировать НЕ надо
+    pretty = json.dumps(profile.profile_data, ensure_ascii=False, indent=2)
+    escaped = html_module.escape(pretty)
+
+    # Один кусок целиком, если влезает в лимит
+    body = header + f"<pre>{escaped}</pre>"
 
     if len(body) > 3900:
-        # Если длинно — без кодоблока, чанками с экраном
-        plain = header + pretty_escaped
-        for i in range(0, len(plain), 3900):
-            await message.answer(plain[i : i + 3900], parse_mode="Markdown")
+        # Разбиваем JSON на чанки и каждый оборачиваем в <pre>
+        chunk_size = 3500  # с запасом на теги <pre></pre> и header
+        is_first = True
+        for i in range(0, len(escaped), chunk_size):
+            chunk = escaped[i : i + chunk_size]
+            prefix = header if is_first else ""
+            await message.answer(f"{prefix}<pre>{chunk}</pre>", parse_mode="HTML")
+            is_first = False
     else:
-        await message.answer(body, parse_mode="Markdown")
+        await message.answer(body, parse_mode="HTML")
