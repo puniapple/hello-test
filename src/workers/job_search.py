@@ -110,10 +110,9 @@ async def _process_user(bot: Bot, user: User) -> dict:
         deferred = fresh[MAX_VACANCIES_PER_USER_PER_CYCLE:]
         log.info("matching", count=len(to_match), deferred=len(deferred))
 
-        # 6. Mark ALL fetched as seen — including deferred — to avoid
-        # re-matching the same items next cycle. Deferred ones simply
-        # won't be sent this round; they're treated as "passed by".
-        await mark_seen(session, user.id, fresh)
+        # 6. Mark only matched items as seen. Deferred ones stay unseen
+        # so they can be picked up in subsequent cycles, not lost forever.
+        await mark_seen(session, user.id, to_match)
         await session.commit()
 
         # 7. Match each
