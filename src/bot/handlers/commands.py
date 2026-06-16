@@ -428,8 +428,8 @@ async def cmd_admin_users(message: Message) -> None:
 
             profile_summary = "пусто"
             if profile and profile.profile_data:
-            pd = profile.profile_data
-            bits = []
+                pd = profile.profile_data
+                bits = []
             if pd.get("seniority"):
                 bits.append(f"уровень: {pd['seniority']}")
             if pd.get("expertise"):
