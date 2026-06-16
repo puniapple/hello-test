@@ -1,5 +1,7 @@
 """Bot command handlers."""
 
+import asyncio
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
@@ -63,11 +65,16 @@ async def get_or_create_user(telegram_id: int, telegram_username: str | None) ->
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    await get_or_create_user(
-        telegram_id=message.from_user.id,
-        telegram_username=message.from_user.username,
-    )
+    # Сначала отвечаем — пользователь видит welcome мгновенно
     await message.answer(WELCOME_TEXT, parse_mode="HTML", disable_web_page_preview=True)
+
+    # БД-операции делаем в фоне, чтобы не блокировать ответ
+    asyncio.create_task(
+        get_or_create_user(
+            telegram_id=message.from_user.id,
+            telegram_username=message.from_user.username,
+        )
+    )
 
 
 @router.message(Command("help"))
