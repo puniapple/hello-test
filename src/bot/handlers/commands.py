@@ -445,23 +445,25 @@ async def cmd_admin_users(message: Message) -> None:
             if profile and profile.profile_data:
                 pd = profile.profile_data
                 bits = []
-            if pd.get("seniority"):
-                bits.append(f"уровень: {pd['seniority']}")
-            if pd.get("expertise"):
-                exp = pd["expertise"]
-                exp_str = ", ".join(exp[:3]) if isinstance(exp, list) else str(exp)
-                bits.append(f"экспертиза: {exp_str[:80]}")
-            if pd.get("target_roles"):
-                roles = ", ".join(pd["target_roles"][:2])
-                bits.append(f"роли: {roles[:80]}")
-            if pd.get("industries_interested"):
-                industries = ", ".join(pd["industries_interested"][:3])
-                bits.append(f"индустрии: {industries[:80]}")
-            if pd.get("ideal_work_description"):
-                ideal = pd["ideal_work_description"]
-                bits.append(f"идеал: {ideal[:100]}")
-            if bits:
-                profile_summary = " | ".join(bits)
+                if pd.get("seniority"):
+                    bits.append(f"уровень: {pd['seniority']}")
+                if pd.get("expertise"):
+                    exp = pd["expertise"]
+                    exp_str = ", ".join(exp[:3]) if isinstance(exp, list) else str(exp)
+                    bits.append(f"экспертиза: {exp_str[:80]}")
+                if pd.get("target_roles"):
+                    tr = pd["target_roles"]
+                    roles = ", ".join(tr[:2]) if isinstance(tr, list) else str(tr)
+                    bits.append(f"роли: {roles[:80]}")
+                if pd.get("industries_interested"):
+                    ind = pd["industries_interested"]
+                    industries = ", ".join(ind[:3]) if isinstance(ind, list) else str(ind)
+                    bits.append(f"индустрии: {industries[:80]}")
+                if pd.get("ideal_work_description"):
+                    ideal = pd["ideal_work_description"]
+                    bits.append(f"идеал: {ideal[:100]}")
+                if bits:
+                    profile_summary = " | ".join(bits)
 
             username = f"@{user.telegram_username}" if user.telegram_username else "—"
             state_value = user.state.value if user.state else "idle"
