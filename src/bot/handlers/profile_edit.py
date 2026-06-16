@@ -38,10 +38,81 @@ async def handle_text_in_editing(message: Message) -> None:
     agent = ProfileAgent(claude=claude)
     reply = await agent.handle_message(user_id=user.id, user_text=message.text)
 
-    await message.answer(reply.text)
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    ready = user.profile_ready_for_search if hasattr(user, "profile_ready_for_search") else False
+    if ready:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Завершить диалог (/done)", callback_data="profile:done")],
+        ])
+    else:
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Уже хватит, начать поиск!", callback_data="profile:start_search")],
+            [InlineKeyboardButton(text="✅ Завершить диалог (/done)", callback_data="profile:done")],
+        ])
+
+    await message.answer(agent_response, reply_markup=keyboard)
 
     if reply.finalized:
         await message.answer(
             "✅ Профиль обновлён. Посмотреть: /show_profile\n"
             "Подключим источники вакансий чуть позже."
         )
+
+from aiogram import F
+from aiogram.types import CallbackQuery
+
+
+@router.callback_query(F.data == "profile:start_search")
+async def handle_start_search(callback: CallbackQuery) -> None:
+    """Юзер нажал 'хватит, начать поиск' — флипаем флаг и запускаем первый цикл."""
+    async with async_session() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Сначала /start", show_alert=True)
+            return
+
+        if user.profile_ready_for_search:
+            await callback.answer("Поиск уже запущен", show_alert=False)
+            return
+
+        user.profile_ready_for_search = True
+        await session.commit()
+
+    await callback.answer("Запускаю поиск! Это займёт пару минут.", show_alert=False)
+    await callback.message.answer(
+        "🚀 Поиск запущен.\n\n"
+        "Бот будет автоматически проверять источники каждые 3 часа и присылать "
+        "релевантные вакансии. Ты можешь продолжать дополнять профиль в любой момент — "
+        "новые ответы попадут в учёт.\n\n"
+        "Если захочешь запустить поиск прямо сейчас — нажми /run_now."
+    )
+
+    # Запускаем первый цикл в фоне
+    from src.workers.job_search import _process_user
+    import asyncio
+    asyncio.create_task(_process_user(callback.bot, user))
+
+
+@router.callback_query(F.data == "profile:done")
+async def handle_done(callback: CallbackQuery) -> None:
+    """Юзер хочет выйти из режима редактирования."""
+    async with async_session() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )).scalar_one_or_none()
+        if user is None:
+            await callback.answer("Сначала /start", show_alert=True)
+            return
+
+        user.state = UserState.idle
+        await session.commit()
+
+    await callback.answer("Режим редактирования завершён", show_alert=False)
+    await callback.message.answer(
+        "✅ Готово. Если ещё не нажал кнопку 'Начать поиск' — бот вакансии присылать не будет.\n\n"
+        "Вернуться к редактированию: /edit_profile\n"
+        "Запустить поиск сейчас: /run_now"
+    )

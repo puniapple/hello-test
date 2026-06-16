@@ -41,7 +41,7 @@ async def run_job_search_cycle(bot: Bot) -> dict:
         result = await session.execute(
             select(User).where(
                 User.is_active.is_(True),
-                User.state != UserState.editing_profile,
+                User.profile_ready_for_search.is_(True),
             )
         )
         users = list(result.scalars())

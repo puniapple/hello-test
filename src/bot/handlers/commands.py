@@ -85,16 +85,105 @@ async def cmd_help(message: Message) -> None:
 
 @router.message(Command("show_profile"))
 async def cmd_show_profile(message: Message) -> None:
-    async with async_session() as session:
-        result = await session.execute(
-            select(Profile).join(User).where(User.telegram_id == message.from_user.id)
-        )
-        profile = result.scalar_one_or_none()
-        if profile is None or not profile.profile_data:
-            await message.answer("Профиль пока пуст. Нажми /edit_profile, чтобы его собрать.")
-            return
-        await message.answer(format_profile(profile.profile_data), parse_mode="MarkdownV2")
+    """Показать текущее состояние профиля, даже если он не закрыт."""
+    import json
 
+    async with async_session() as session:
+        user = (await session.execute(
+            select(User).where(User.telegram_id == message.from_user.id)
+        )).scalar_one_or_none()
+        if user is None:
+            await message.answer("Сначала /start.")
+            return
+
+        profile = (await session.execute(
+            select(Profile).where(Profile.user_id == user.id)
+        )).scalar_one_or_none()
+
+    if profile is None or not profile.profile_data:
+        await message.answer(
+            "Профиль пустой. Жми /edit_profile, чтобы начать собирать."
+        )
+        return
+
+    pd = profile.profile_data
+    ready_emoji = "🚀" if user.profile_ready_for_search else "⏸"
+    status = "поиск активен" if user.profile_ready_for_search else "поиск ещё не запущен"
+
+    parts = [f"{ready_emoji} Статус: {status}\n"]
+
+    # Дружелюбное отображение основных полей, если они заполнены
+    fields_map = [
+        ("expertise", "Экспертиза"),
+        ("current_role_summary", "Текущая роль"),
+        ("ideal_work_description", "Идеальная работа"),
+        ("interests_and_resonance", "Резонирует"),
+        ("target_roles", "Целевые роли"),
+        ("anti_roles", "Anti-roles"),
+        ("industries_interested", "Интересные индустрии"),
+        ("industries_avoid", "Избегаемые индустрии"),
+        ("seniority", "Уровень"),
+        ("languages", "Языки"),
+        ("must_haves", "Must haves"),
+        ("deal_breakers", "Deal-breakers"),
+    ]
+
+    for key, label in fields_map:
+        value = pd.get(key)
+        if not value:
+            continue
+        if isinstance(value, list):
+            display = ", ".join(str(v) for v in value)
+        else:
+            display = str(value)
+        if len(display) > 300:
+            display = display[:300] + "…"
+        parts.append(f"**{label}**: {display}")
+
+    # Локация и формат отдельно
+    lp = pd.get("location_preferences")
+    if isinstance(lp, dict):
+        loc_bits = []
+        if lp.get("cities"):
+            loc_bits.append(", ".join(lp["cities"]))
+        if lp.get("countries"):
+            loc_bits.append(", ".join(lp["countries"]))
+        if lp.get("remote_ok"):
+            loc_bits.append("remote ok")
+        if loc_bits:
+            parts.append(f"**Локация**: {' | '.join(loc_bits)}")
+
+    fmt = pd.get("format")
+    if fmt:
+        parts.append(f"**Формат**: {', '.join(fmt) if isinstance(fmt, list) else fmt}")
+
+    comp = pd.get("compensation")
+    if isinstance(comp, dict):
+        comp_bits = []
+        if comp.get("min_monthly"):
+            comp_bits.append(f"мин: {comp['min_monthly']:,}")
+        if comp.get("comfortable_monthly"):
+            comp_bits.append(f"комфортно: {comp['comfortable_monthly']:,}")
+        if comp.get("currency"):
+            comp_bits.append(comp["currency"])
+        if comp_bits:
+            parts.append(f"**Деньги**: {' '.join(comp_bits)}")
+
+    # CV
+    cv_sources = pd.get("cv_sources") or []
+    if cv_sources:
+        parts.append(f"**Резюме**: загружено ({len(cv_sources)} файл(а/ов))")
+
+    parts.append("")
+    parts.append("Хочешь дополнить — /edit_profile.")
+    if not user.profile_ready_for_search:
+        parts.append("Запустить поиск — /run_now или нажми кнопку в диалоге с агентом.")
+
+    text = "\n".join(parts)
+    if len(text) > 3900:
+        text = text[:3900] + "…"
+
+    await message.answer(text, parse_mode="Markdown")
 
 @router.message(Command("edit_profile"))
 async def cmd_edit_profile(message: Message) -> None:
@@ -339,30 +428,33 @@ async def cmd_admin_users(message: Message) -> None:
 
             profile_summary = "пусто"
             if profile and profile.profile_data:
-                pd = profile.profile_data
-                bits = []
-                if pd.get("seniority"):
-                    bits.append(f"уровень: {pd['seniority']}")
-                if pd.get("target_roles"):
-                    roles = ", ".join(pd["target_roles"][:2])
-                    bits.append(f"роли: {roles[:80]}")
-                if pd.get("industries_interested"):
-                    industries = ", ".join(pd["industries_interested"][:3])
-                    bits.append(f"индустрии: {industries[:80]}")
-                if pd.get("location_preferences"):
-                    lp = pd["location_preferences"]
-                    if isinstance(lp, dict):
-                        cities = lp.get("cities", [])
-                        if cities:
-                            bits.append(f"локации: {', '.join(cities[:3])}")
-                if bits:
-                    profile_summary = " | ".join(bits)
+            pd = profile.profile_data
+            bits = []
+            if pd.get("seniority"):
+                bits.append(f"уровень: {pd['seniority']}")
+            if pd.get("expertise"):
+                exp = pd["expertise"]
+                exp_str = ", ".join(exp[:3]) if isinstance(exp, list) else str(exp)
+                bits.append(f"экспертиза: {exp_str[:80]}")
+            if pd.get("target_roles"):
+                roles = ", ".join(pd["target_roles"][:2])
+                bits.append(f"роли: {roles[:80]}")
+            if pd.get("industries_interested"):
+                industries = ", ".join(pd["industries_interested"][:3])
+                bits.append(f"индустрии: {industries[:80]}")
+            if pd.get("ideal_work_description"):
+                ideal = pd["ideal_work_description"]
+                bits.append(f"идеал: {ideal[:100]}")
+            if bits:
+                profile_summary = " | ".join(bits)
 
             username = f"@{user.telegram_username}" if user.telegram_username else "—"
             state_value = user.state.value if user.state else "idle"
             state_emoji = {
                 "idle": "✅", "paused": "⏸", "editing_profile": "✏️"
             }.get(state_value, "❓")
+
+            ready_emoji = "🚀" if user.profile_ready_for_search else "⏸"
 
             block = (
                 f"{state_emoji} {username} (id: {user.telegram_id})\n"
