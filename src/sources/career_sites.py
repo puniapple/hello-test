@@ -32,6 +32,7 @@ def _registry() -> dict[str, tuple[str, str, ParserFn]]:
         "uzum": ("Uzum", "https://people.uzum.com/career/ru/vacancies", _parse_uzum),
         "avito": ("Avito", "https://career.avito.com/vacancies/", _parse_avito),
         "vk_company": ("VK Company", "https://team.vk.company/vacancy/", _parse_vk_company),
+        "yandex": ("Яндекс", "https://yandex.ru/jobs/vacancies", _parse_yandex),
     }
 
 
@@ -609,3 +610,133 @@ def _parse_vk_company(html: str, base_url: str) -> list[Vacancy]:
 
     return vacancies
 
+
+def _parse_yandex(html: str, base_url: str) -> list[Vacancy]:
+    """Парсер для yandex.ru/jobs/vacancies.
+
+    На карточке Яндекса title живёт НЕ в h-заголовке, а отдельной строкой
+    между блоком метаданных (сервис, город, формат) и описанием.
+    Берём самую длинную строку из карточки длиной 20–200 символов,
+    которая не совпадает с уже известными "не-title" вещами.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    link_pattern = re.compile(r"^/jobs/vacancies/([a-z0-9\-]+?)-(\d+)/?$")
+
+    formats_list = ["офис", "гибридный формат", "удалённая работа", "удаленная работа"]
+    cities_list = [
+        "Москва", "Санкт-Петербург", "Екатеринбург", "Новосибирск",
+        "Казань", "Нижний Новгород", "Сасово", "Воронеж", "Тула",
+        "Самара", "Сочи", "Уфа", "Иннополис", "Белград", "Минск",
+    ]
+    # Подстроки, по которым понимаем, что это НЕ title, а метаданные
+    metadata_markers = [
+        "ещё", "технолог", "город", "москв", "санкт-петер", "офис",
+        "гибрид", "удалённ", "удаленн", "общие сервис", "поиск с алис",
+    ]
+
+    for link in soup.find_all("a", href=link_pattern):
+        href = link.get("href", "")
+        match = link_pattern.match(href)
+        if not match:
+            continue
+        slug, vacancy_id = match.group(1), match.group(2)
+        if vacancy_id in seen_ids:
+            continue
+        seen_ids.add(vacancy_id)
+
+        external_id = f"yandex:{vacancy_id}"
+        full_url = f"https://yandex.ru/jobs{href}"
+
+        # Поднимаемся к карточке: контейнер с длинным текстом (>200 символов)
+        card = link.parent
+        for _ in range(6):
+            if card is None:
+                break
+            text_len = len(card.get_text(" ", strip=True))
+            if text_len > 200:
+                break
+            card = card.parent
+        if card is None:
+            continue
+
+        # Все строки карточки
+        lines = [
+            l.strip()
+            for l in card.get_text("\n", strip=True).split("\n")
+            if l.strip()
+        ]
+
+        # Service — линк на /jobs/services/.../about
+        service = None
+        service_link = card.find("a", href=re.compile(r"^/jobs/services/[a-z0-9_\-]+/about"))
+        if service_link:
+            service = service_link.get_text(strip=True)
+
+        # Title — самая длинная строка, которая:
+        # - длиной 20–200 символов
+        # - не метаданные (нет маркеров типа "Москва", "офис", "ещё 1")
+        # - не название сервиса
+        title_candidates = []
+        for line in lines:
+            line_lower = line.lower()
+            if not (20 < len(line) < 200):
+                continue
+            if service and line == service:
+                continue
+            if any(m in line_lower for m in metadata_markers):
+                continue
+            title_candidates.append(line)
+
+        if title_candidates:
+            # Берём первую подходящую строку — обычно она и есть заголовок
+            title = title_candidates[0]
+        else:
+            # Fallback: самая длинная строка карточки до 250 символов
+            title = max((l for l in lines if len(l) < 250), key=len, default="Вакансия Яндекса")
+
+        full_text = card.get_text(" ", strip=True)
+
+        # Локация и формат
+        location = next((c for c in cities_list if c in full_text), None)
+        work_format = next(
+            (f for f in formats_list if f in full_text.lower()), None
+        )
+
+        final_location = None
+        if location and work_format:
+            final_location = f"{location}, {work_format}"
+        elif location:
+            final_location = location
+        elif work_format:
+            final_location = work_format
+
+        # Description: title + сервис + локация + тело
+        description_parts = [title]
+        if service:
+            description_parts.append(f"Сервис: {service}")
+        if final_location:
+            description_parts.append(f"Локация: {final_location}")
+        body = full_text.replace(title, "", 1).strip()
+        if body and len(body) > 30:
+            description_parts.append(body[:1500])
+        description = "\n".join(description_parts)
+
+        vacancies.append(
+            Vacancy(
+                external_id=external_id,
+                source_type=SourceType.career_site,
+                title=title[:200],
+                company="Яндекс",
+                url=full_url,
+                description=description,
+                salary=None,
+                location=final_location,
+                published_at=None,
+                raw={"site": "yandex", "service": service, "slug": slug},
+            )
+        )
+
+    return vacancies
