@@ -30,6 +30,7 @@ def _registry() -> dict[str, tuple[str, str, ParserFn]]:
         "aviasales": ("Aviasales", "https://www.aviasales.ru/about/vacancies", _parse_aviasales),
         "garage_eight": ("Garage Eight", "https://garage-eight.com/vacancies/", _parse_garage_eight),
         "uzum": ("Uzum", "https://people.uzum.com/career/ru/vacancies", _parse_uzum),
+        "avito": ("Avito", "https://career.avito.com/vacancies/", _parse_avito),
     }
 
 
@@ -376,3 +377,132 @@ def _parse_uzum(html: str, base_url: str) -> list[Vacancy]:
         )
 
     return vacancies
+
+def _parse_avito(html: str, base_url: str) -> list[Vacancy]:
+    """Парсер для career.avito.com/vacancies/.
+
+    Структура: каждая вакансия — две ссылки на /vacancies/{direction}/{id}/
+    (одна иконка-картинка, одна с текстом). Берём ту, у которой есть текст.
+    Локация и формат работы — соседние элементы в родительском контейнере.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    link_pattern = re.compile(r"^/vacancies/([a-z\-]+)/(\d+)/?$")
+
+    for link in soup.find_all("a", href=link_pattern):
+        href = link.get("href", "")
+        text = link.get_text(" ", strip=True)
+        if not text:
+            continue  # это пустая ссылка-иконка, пропускаем
+
+        match = link_pattern.match(href)
+        if not match:
+            continue
+        direction, vacancy_id = match.group(1), match.group(2)
+        if vacancy_id in seen_ids:
+            continue
+        seen_ids.add(vacancy_id)
+
+        external_id = f"avito:{vacancy_id}"
+        full_url = f"https://career.avito.com{href}"
+
+        # Локация и формат — следующие элементы у родительского блока
+        location, work_format, team = _extract_avito_meta(link)
+
+        # Description складываем из всего, что есть — нужно matcher'у для оценки
+        description_parts = [text]
+        if direction:
+            description_parts.append(f"Направление: {direction.replace('-', ' ')}")
+        if team:
+            description_parts.append(f"Команда: {team}")
+        if location:
+            description_parts.append(f"Локация: {location}")
+        if work_format:
+            description_parts.append(f"Формат: {work_format}")
+        description = "\n".join(description_parts)
+
+        # Итоговая локация — комбинация города и формата
+        final_location = None
+        if location and work_format:
+            final_location = f"{location}, {work_format}"
+        elif location:
+            final_location = location
+        elif work_format:
+            final_location = work_format
+
+        vacancies.append(
+            Vacancy(
+                external_id=external_id,
+                source_type=SourceType.career_site,
+                title=text[:200],
+                company="Avito",
+                url=full_url,
+                description=description,
+                salary=None,  # Avito не публикует зарплату на листинге
+                location=final_location,
+                published_at=None,
+                raw={"site": "avito", "direction": direction, "team": team},
+            )
+        )
+
+    return vacancies
+
+
+def _extract_avito_meta(link_tag) -> tuple[str | None, str | None, str | None]:
+    """Из родителя ссылки достаём локацию, формат работы и команду."""
+    cities = {
+        "москва", "санкт-петербург", "казань", "нижний новгород", "тула",
+        "краснодар", "ростов-на-дону", "самара", "волгоград", "воронеж",
+        "екатеринбург", "новосибирск", "удалённая работа",
+    }
+    formats = {
+        "удалёнка", "офис", "гибрид", "гибрид или удалёнка",
+        "разъездной", "гибрид подходит для людей с овз",
+    }
+
+    # Поднимаемся вверх по дереву, ищем контейнер вакансии
+    container = link_tag.parent
+    matched_container = None
+    for _ in range(5):
+        if container is None:
+            break
+        try:
+            text = container.get_text(" ", strip=True).lower()
+        except AttributeError:
+            break
+        if any(c in text for c in cities) or any(f in text for f in formats):
+            matched_container = container
+            break
+        container = container.parent
+
+    if matched_container is None:
+        return None, None, None
+
+    full_text = matched_container.get_text(" | ", strip=True)
+    full_text_lower = full_text.lower()
+
+    location = None
+    for city in sorted(cities, key=len, reverse=True):
+        idx = full_text_lower.find(city)
+        if idx != -1:
+            location = full_text[idx : idx + len(city)]
+            break
+
+    work_format = None
+    for fmt in sorted(formats, key=len, reverse=True):
+        idx = full_text_lower.find(fmt)
+        if idx != -1:
+            work_format = full_text[idx : idx + len(fmt)]
+            break
+
+    team = None
+    try:
+        team_link = matched_container.find("a", href=re.compile(r"^/teams/[a-z\-]+/?$"))
+        if team_link:
+            team = team_link.get_text(strip=True)
+    except AttributeError:
+        team = None
+
+    return location, work_format, team
