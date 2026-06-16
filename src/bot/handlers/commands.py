@@ -9,6 +9,7 @@ from sqlalchemy import select
 from src.agents.profile_agent import ProfileAgent
 from src.services.claude import ClaudeService
 from src.services.source_provisioning import provision_default_sources
+from src.config import settings
 
 from src.db.models import Profile, User, UserState, UserReaction
 from src.db.session import async_session
