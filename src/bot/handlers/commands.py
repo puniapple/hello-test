@@ -151,6 +151,7 @@ async def cmd_show_profile(message: Message) -> None:
         if len(display) > 300:
             display = display[:300] + "…"
         parts.append(f"<b>{label}</b>: {_escape_html(display)}")
+        parts.append("")
 
     # Локация и формат отдельно
     lp = pd.get("location_preferences")
@@ -164,10 +165,12 @@ async def cmd_show_profile(message: Message) -> None:
             loc_bits.append("remote ok")
         if loc_bits:
             parts.append(f"<b>Локация</b>: {_escape_html(' | '.join(loc_bits))}")
+            parts.append("")
 
     fmt = pd.get("format")
     if fmt:
         parts.append(f"<b>Формат</b>: {_escape_html(', '.join(fmt) if isinstance(fmt, list) else fmt)}")
+        parts.append("")
 
     comp = pd.get("compensation")
     if isinstance(comp, dict):
@@ -180,16 +183,16 @@ async def cmd_show_profile(message: Message) -> None:
             comp_bits.append(comp["currency"])
         if comp_bits:
             parts.append(f"<b>Деньги</b>: {_escape_html(' '.join(comp_bits))}")
-
+            parts.append("")
     # CV
     cv_sources = pd.get("cv_sources") or []
     if cv_sources:
         parts.append(f"<b>Резюме</b>: загружено ({len(cv_sources)} файл(а/ов))")
 
     parts.append("")
-    parts.append("Хочешь дополнить — /edit_profile.")
+    parts.append("Хочешь дополнить — /edit_profile")
     if not user.profile_ready_for_search:
-        parts.append("Запустить поиск — /run_now или нажми кнопку в диалоге с агентом.")
+        parts.append("Запустить поиск — /run_now")
 
     text = "\n".join(parts)
     if len(text) > 3900:
