@@ -9,6 +9,7 @@ TELEGRAM_CHANNELS: list[str] = [
     "hcareers_jobs",
     "budujobs",
     "dddwork",
+    "femtechforce",
     # Product / Project / Strategy
     "product_jobs",
     # EdTech
