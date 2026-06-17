@@ -27,6 +27,7 @@ logger = structlog.get_logger(__name__)
 MAX_VACANCIES_PER_USER_PER_CYCLE = 150
 MAX_DELIVERIES_PER_USER_PER_CYCLE = 8
 USER_CONCURRENCY = 3
+MAX_VACANCIES_PER_SOURCE = 50
 
 
 async def run_job_search_cycle(bot: Bot) -> dict:
@@ -171,23 +172,27 @@ async def _process_user(bot: Bot, user: User) -> dict:
 
 
 async def _fetch_from_all_sources(sources: list[Source]) -> list[Vacancy]:
-    """Fetch from every source in parallel, collect into one list.
-    
-    Каждый источник имеет жёсткий таймаут — если зависает, пропускаем.
-    """
+    """Fetch from every source in parallel, with per-source cap and timeout."""
     tg = TelegramChannelSource()
     cs = CareerSiteSource()
-    SOURCE_TIMEOUT = 30  # секунд на один источник
+    SOURCE_TIMEOUT = 30
 
     async def fetch_one(s: Source) -> list[Vacancy]:
         try:
             if s.source_type == SourceType.telegram_channel:
-                return await asyncio.wait_for(tg.fetch(s), timeout=SOURCE_TIMEOUT)
-            if s.source_type == SourceType.career_site:
-                return await asyncio.wait_for(cs.fetch(s), timeout=SOURCE_TIMEOUT)
-            return []
+                vacancies = await asyncio.wait_for(tg.fetch(s), timeout=SOURCE_TIMEOUT)
+            elif s.source_type == SourceType.career_site:
+                vacancies = await asyncio.wait_for(cs.fetch(s), timeout=SOURCE_TIMEOUT)
+            else:
+                return []
+
+            # Per-source cap: shuffle and take first N to avoid big sources dominating
+            if len(vacancies) > MAX_VACANCIES_PER_SOURCE:
+                random.shuffle(vacancies)
+                vacancies = vacancies[:MAX_VACANCIES_PER_SOURCE]
+            return vacancies
         except asyncio.TimeoutError:
-            logger.warning("source_timeout", identifier=s.identifier, timeout=SOURCE_TIMEOUT)
+            logger.warning("source_timeout", identifier=s.identifier)
             return []
         except Exception as e:
             logger.warning("source_failed", identifier=s.identifier, error=str(e))

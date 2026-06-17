@@ -20,8 +20,6 @@ TELEGRAM_CHANNELS: list[str] = [
     "theyseeku",
     # Product / Project / Strategy
     "product_jobs",
-    "forproducts",
-    "projects_jobs_feed",
     # EdTech
     "edujobs",
     "whiteedtechwork",

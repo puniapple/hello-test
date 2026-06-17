@@ -50,11 +50,8 @@ def _registry() -> dict[str, tuple]:
         # ─── Greenhouse API: лёгко добавить любую компанию из их экосистемы ───
         "anthropic": ("Anthropic", "greenhouse", "anthropic"),
         "stripe": ("Stripe", "greenhouse", "stripe"),
-        "notion": ("Notion", "greenhouse", "notion"),
-        "linear": ("Linear", "greenhouse", "linear"),
         "figma": ("Figma", "greenhouse", "figma"),
         "mercury": ("Mercury", "greenhouse", "mercury"),
-        "plaid": ("Plaid", "greenhouse", "plaid"),
         "datadog": ("Datadog", "greenhouse", "datadog"),
         "vercel": ("Vercel", "greenhouse", "vercel"),
         "duolingo": ("Duolingo", "greenhouse", "duolingo"),
@@ -65,7 +62,6 @@ def _registry() -> dict[str, tuple]:
 
         # ─── кастомный HTML ───
         "zalando": ("Zalando", "html", "https://jobs.zalando.com/en/jobs", _parse_zalando),
-        "lesta": ("Lesta Games", "html", "https://join.lesta.team", _parse_lesta),
     }
 
 
