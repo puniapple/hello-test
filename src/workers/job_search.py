@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from datetime import datetime, timezone
 
 import structlog
@@ -23,17 +24,13 @@ from src.sources.telegram_channel import TelegramChannelSource
 
 logger = structlog.get_logger(__name__)
 
-# Per-user limits to control cost and Telegram noise
-MAX_VACANCIES_PER_USER_PER_CYCLE = 50  # how many to match (cost cap)
-MAX_DELIVERIES_PER_USER_PER_CYCLE = 8   # how many to actually send (noise cap)
-USER_CONCURRENCY = 3  # how many users processed in parallel
+MAX_VACANCIES_PER_USER_PER_CYCLE = 150
+MAX_DELIVERIES_PER_USER_PER_CYCLE = 8
+USER_CONCURRENCY = 3
 
 
 async def run_job_search_cycle(bot: Bot) -> dict:
-    """One full pass: all active users, all their sources, match, deliver.
-
-    Returns summary stats.
-    """
+    """One full pass: all active users, all their sources, match, deliver."""
     log = logger.bind(cycle_started_at=datetime.now(timezone.utc).isoformat())
     log.info("cycle_start")
 
@@ -78,17 +75,13 @@ async def _process_user(bot: Bot, user: User) -> dict:
     """Full pipeline for one user."""
     log = logger.bind(user_id=user.id, telegram_id=user.telegram_id)
 
-    async def _process_user(bot: Bot, user: User) -> dict:
-        """Full pipeline for one user."""
-        log = logger.bind(user_id=user.id, telegram_id=user.telegram_id)
-
-        # Subscription gate: если канал настроен и юзер отписался — пропускаем
-        from src.services.subscription import is_required_channel_configured, is_subscribed
-        if is_required_channel_configured():
-            subscribed = await is_subscribed(bot, user.telegram_id)
-            if not subscribed:
-                log.info("skip_not_subscribed")
-                return {"fetched": 0, "matched": 0, "delivered": 0}
+    # Subscription gate: если канал настроен и юзер отписался — пропускаем
+    from src.services.subscription import is_required_channel_configured, is_subscribed
+    if is_required_channel_configured():
+        subscribed = await is_subscribed(bot, user.telegram_id)
+        if not subscribed:
+            log.info("skip_not_subscribed")
+            return {"fetched": 0, "matched": 0, "delivered": 0}
 
     async with async_session() as session:
         # 1. Load profile
@@ -117,7 +110,8 @@ async def _process_user(bot: Bot, user: User) -> dict:
         if not fresh:
             return {"fetched": len(all_fetched), "matched": 0, "delivered": 0}
 
-        # 5. Cap how many we'll match (cost control)
+        # 5. Cap how many we'll match (cost control), shuffle first для честной выборки
+        random.shuffle(fresh)
         to_match = fresh[:MAX_VACANCIES_PER_USER_PER_CYCLE]
         deferred = fresh[MAX_VACANCIES_PER_USER_PER_CYCLE:]
         log.info("matching", count=len(to_match), deferred=len(deferred))
@@ -166,7 +160,6 @@ async def _process_user(bot: Bot, user: User) -> dict:
                     disable_web_page_preview=False,
                 )
                 sent_count += 1
-                # Small delay to avoid Telegram flood-control
                 await asyncio.sleep(0.5)
             except Exception as e:
                 log.warning("delivery_failed", url=vacancy.url, error=str(e))
