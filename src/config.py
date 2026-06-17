@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
 
     admin_telegram_ids: str = ""  # comma-separated list of admin Telegram IDs
+    required_channel_username: str = ""  # например "@your_channel", пусто = выключено
 
 
 settings = Settings()

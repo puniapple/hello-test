@@ -5,7 +5,7 @@ import html as html_module
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from src.agents.profile_agent import ProfileAgent
 from src.services.claude import ClaudeService
@@ -67,17 +67,21 @@ async def get_or_create_user(telegram_id: int, telegram_username: str | None) ->
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    # Сначала отвечаем — пользователь видит welcome мгновенно
-    await message.answer(WELCOME_TEXT, parse_mode="HTML", disable_web_page_preview=True)
+    # Гейт: проверяем подписку на канал
+    if is_required_channel_configured():
+        subscribed = await is_subscribed(message.bot, message.from_user.id)
+        if not subscribed:
+            await _send_subscription_gate(message)
+            return
 
-    # БД-операции делаем в фоне, чтобы не блокировать ответ
+    # Обычный flow
+    await message.answer(WELCOME_TEXT, parse_mode="HTML", disable_web_page_preview=True)
     asyncio.create_task(
         get_or_create_user(
             telegram_id=message.from_user.id,
             telegram_username=message.from_user.username,
         )
     )
-
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
@@ -337,7 +341,27 @@ async def cmd_run_now(message: Message) -> None:
         await message.answer("Сначала напиши /start.")
         return
 
+    @router.message(Command("run_now"))
+    async def cmd_run_now(message: Message) -> None:
+        async with async_session() as session:
+            result = await session.execute(
+                select(User).where(User.telegram_id == message.from_user.id)
+            )
+            user = result.scalar_one_or_none()
+        if user is None:
+            await message.answer("Сначала напиши /start.")
+            return
+
+    # Проверка подписки
+    if is_required_channel_configured():
+        subscribed = await is_subscribed(message.bot, message.from_user.id)
+        if not subscribed:
+            await _send_subscription_gate(message)
+            return
+
     await message.answer("🔄 Запускаю поиск... минут пять займёт.")
+    # ... остальной код без изменений
+    
 
     from src.workers.job_search import _process_user
     try:
@@ -551,3 +575,54 @@ async def cmd_admin_profile(message: Message) -> None:
             is_first = False
     else:
         await message.answer(body, parse_mode="HTML")
+
+
+from src.services.subscription import (
+    get_channel_display,
+    get_channel_url,
+    is_required_channel_configured,
+    is_subscribed,
+)
+
+
+async def _send_subscription_gate(message: Message) -> None:
+    """Показывает экран 'подпишись на канал и нажми проверить'."""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Перейти в канал", url=get_channel_url())],
+        [InlineKeyboardButton(text="✅ Я подписался — проверить", callback_data="sub:check")],
+    ])
+    text = (
+        f"Привет! Чтобы пользоваться ботом, подпишись на мой канал "
+        f"{get_channel_display()}.\n\n"
+        f"Там я рассказываю про карьерные стратегии, BD-практики и делюсь "
+        f"находками из мира работы. После подписки нажми кнопку — продолжим."
+    )
+    await message.answer(text, reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "sub:check")
+async def handle_subscription_check(callback: CallbackQuery) -> None:
+    """Юзер нажал 'я подписался, проверь' — повторно проверяем."""
+    subscribed = await is_subscribed(callback.bot, callback.from_user.id)
+    if subscribed:
+        await callback.answer("✅ Подписка подтверждена!", show_alert=False)
+        # Удаляем сообщение с гейтом
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        # Запускаем стандартный flow приветствия
+        await callback.message.answer(WELCOME_TEXT, parse_mode="HTML", disable_web_page_preview=True)
+        # И провижининг в фоне, как в обычном /start
+        asyncio.create_task(
+            get_or_create_user(
+                telegram_id=callback.from_user.id,
+                telegram_username=callback.from_user.username,
+            )
+        )
+    else:
+        await callback.answer(
+            "Пока не вижу подписки. Подпишись и нажми ещё раз.",
+            show_alert=True,
+        )
+
