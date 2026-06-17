@@ -79,16 +79,16 @@ async def _process_user(bot: Bot, user: User) -> dict:
     log = logger.bind(user_id=user.id, telegram_id=user.telegram_id)
 
     async def _process_user(bot: Bot, user: User) -> dict:
-    """Full pipeline for one user."""
-    log = logger.bind(user_id=user.id, telegram_id=user.telegram_id)
+        """Full pipeline for one user."""
+        log = logger.bind(user_id=user.id, telegram_id=user.telegram_id)
 
-    # Subscription gate: если канал настроен и юзер отписался — пропускаем
-    from src.services.subscription import is_required_channel_configured, is_subscribed
-    if is_required_channel_configured():
-        subscribed = await is_subscribed(bot, user.telegram_id)
-        if not subscribed:
-            log.info("skip_not_subscribed")
-            return {"fetched": 0, "matched": 0, "delivered": 0}
+        # Subscription gate: если канал настроен и юзер отписался — пропускаем
+        from src.services.subscription import is_required_channel_configured, is_subscribed
+        if is_required_channel_configured():
+            subscribed = await is_subscribed(bot, user.telegram_id)
+            if not subscribed:
+                log.info("skip_not_subscribed")
+                return {"fetched": 0, "matched": 0, "delivered": 0}
 
     async with async_session() as session:
         # 1. Load profile
