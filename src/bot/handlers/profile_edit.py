@@ -51,7 +51,7 @@ async def handle_text_in_editing(message: Message) -> None:
             [InlineKeyboardButton(text="✅ Завершить диалог (/done)", callback_data="profile:done")],
         ])
 
-    await message.answer(agent_response, reply_markup=keyboard)
+    await message.answer(reply.text, reply_markup=keyboard)
 
     if reply.finalized:
         await message.answer(
