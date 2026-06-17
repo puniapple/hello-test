@@ -258,13 +258,20 @@ async def cmd_pause(message: Message) -> None:
 @router.message(Command("resume"))
 async def cmd_resume(message: Message) -> None:
     async with async_session() as session:
-        result = await session.execute(select(User).where(User.telegram_id == message.from_user.id))
+        result = await session.execute(
+            select(User).where(User.telegram_id == message.from_user.id)
+        )
         user = result.scalar_one_or_none()
-        if user:
-            user.state = UserState.idle
-            user.is_active = True
-            await session.commit()
-    await message.answer("Возобновила. Жди вакансий ✨")
+        if user is None:
+            await message.answer("Сначала напиши /start.")
+            return
+        user.is_active = True
+        user.profile_ready_for_search = True
+        await session.commit()
+    await message.answer(
+        "🚀 Поиск возобновлён. Бот будет проверять источники каждые 3 часа "
+        "и присылать тебе релевантные вакансии."
+    )
 
 
 def _escape_md(text: str) -> str:
