@@ -171,16 +171,23 @@ async def _process_user(bot: Bot, user: User) -> dict:
 
 
 async def _fetch_from_all_sources(sources: list[Source]) -> list[Vacancy]:
-    """Fetch from every source in parallel, collect into one list."""
+    """Fetch from every source in parallel, collect into one list.
+    
+    Каждый источник имеет жёсткий таймаут — если зависает, пропускаем.
+    """
     tg = TelegramChannelSource()
     cs = CareerSiteSource()
+    SOURCE_TIMEOUT = 30  # секунд на один источник
 
     async def fetch_one(s: Source) -> list[Vacancy]:
         try:
             if s.source_type == SourceType.telegram_channel:
-                return await tg.fetch(s)
+                return await asyncio.wait_for(tg.fetch(s), timeout=SOURCE_TIMEOUT)
             if s.source_type == SourceType.career_site:
-                return await cs.fetch(s)
+                return await asyncio.wait_for(cs.fetch(s), timeout=SOURCE_TIMEOUT)
+            return []
+        except asyncio.TimeoutError:
+            logger.warning("source_timeout", identifier=s.identifier, timeout=SOURCE_TIMEOUT)
             return []
         except Exception as e:
             logger.warning("source_failed", identifier=s.identifier, error=str(e))
