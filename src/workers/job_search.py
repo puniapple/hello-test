@@ -125,14 +125,28 @@ async def _process_user(bot: Bot, user: User) -> dict:
         # 7. Match each
         matcher = VacancyMatcher()
         deliveries: list[tuple[Vacancy, MatchResult]] = []
+        all_scores: list[float] = []
         for vacancy in to_match:
             try:
                 match = await matcher.match(profile.profile_data, vacancy)
             except Exception as e:
                 log.warning("match_failed", url=vacancy.url, error=str(e))
                 continue
+            all_scores.append(match.score)
             if match.should_send:
                 deliveries.append((vacancy, match))
+
+        if all_scores:
+            buckets = {"9-10": 0, "8-9": 0, "7-8": 0, "6-7": 0, "5-6": 0, "4-5": 0, "<4": 0}
+            for s in all_scores:
+                if s >= 9: buckets["9-10"] += 1
+                elif s >= 8: buckets["8-9"] += 1
+                elif s >= 7: buckets["7-8"] += 1
+                elif s >= 6: buckets["6-7"] += 1
+                elif s >= 5: buckets["5-6"] += 1
+                elif s >= 4: buckets["4-5"] += 1
+                else: buckets["<4"] += 1
+            log.info("score_distribution", **buckets)
 
         # 8. Sort by score desc, cap to delivery limit
         deliveries.sort(key=lambda d: d[1].score, reverse=True)
