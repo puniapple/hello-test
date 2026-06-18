@@ -47,6 +47,7 @@ class ClaudeService:
         kwargs = {
             "model": model or self.model,
             "messages": messages,
+            "max_tokens": max_tokens,
             # остальные поля (max_tokens, temperature и т.д.) оставь как были
         }
 
