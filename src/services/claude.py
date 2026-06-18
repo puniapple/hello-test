@@ -44,15 +44,26 @@ class ClaudeService:
         messages — list of {"role": "user"|"assistant", "content": ...}
         Content can be a string or a list of content blocks (text, document, image).
         """
-        kwargs: dict[str, Any] = {
+        kwargs = {
             "model": model or self.model,
-            "max_tokens": max_tokens,
             "messages": messages,
+            # остальные поля (max_tokens, temperature и т.д.) оставь как были
         }
+
         if system:
-            kwargs["system"] = system
+            kwargs["system"] = [
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+
         if tools:
-            kwargs["tools"] = tools
+            kwargs["tools"] = [
+                {**tool, "cache_control": {"type": "ephemeral"}} if i == len(tools) - 1 else tool
+                for i, tool in enumerate(tools)
+            ]
 
         response = await self.client.messages.create(**kwargs)
 

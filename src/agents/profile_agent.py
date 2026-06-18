@@ -253,6 +253,8 @@ class ProfileAgent:
         session: AsyncSession,
         user_id: int,
     ) -> list[dict[str, Any]]:
+        MAX_HISTORY_MESSAGES = 30  # 15 пар (юзер + ассистент)
+
         result = await session.execute(
             select(ChatMessage)
             .where(
@@ -262,7 +264,10 @@ class ProfileAgent:
             .order_by(ChatMessage.created_at.desc())
             .limit(MAX_HISTORY_MESSAGES)
         )
-        messages = list(reversed(result.scalars().all()))
+        all_messages = list(reversed(result.scalars().all()))
+        # Берём только последние N — Claude видит профиль через get_current_profile tool,
+        # вся прошлая беседа не нужна
+        messages = all_messages[-MAX_HISTORY_MESSAGES:]
         return [{"role": m.role.value, "content": m.content} for m in messages]
 
     async def _save_message(
