@@ -682,7 +682,7 @@ def _parse_yandex(html: str, base_url: str) -> list[Vacancy]:
         seen_ids.add(vacancy_id)
 
         external_id = f"yandex:{vacancy_id}"
-        full_url = f"https://yandex.ru/jobs{href}"
+        full_url = f"https://yandex.ru{href}"
 
         # Поднимаемся к карточке: контейнер с длинным текстом (>200 символов)
         card = link.parent
