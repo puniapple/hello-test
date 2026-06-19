@@ -269,7 +269,7 @@ async def cmd_resume(message: Message) -> None:
         user.profile_ready_for_search = True
         await session.commit()
     await message.answer(
-        "🚀 Поиск возобновлён. Бот будет проверять источники каждые 3 часа "
+        "🚀 Поиск возобновлён. Бот будет проверять источники каждые 8 часов "
         "и присылать тебе релевантные вакансии."
     )
 
