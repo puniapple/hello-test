@@ -24,7 +24,7 @@ from src.sources.telegram_channel import TelegramChannelSource
 
 logger = structlog.get_logger(__name__)
 
-MAX_VACANCIES_PER_USER_PER_CYCLE = 150
+MAX_VACANCIES_PER_USER_PER_CYCLE = 50
 MAX_DELIVERIES_PER_USER_PER_CYCLE = 8
 USER_CONCURRENCY = 3
 MAX_VACANCIES_PER_SOURCE = 50
