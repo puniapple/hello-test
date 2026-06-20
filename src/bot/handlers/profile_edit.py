@@ -5,7 +5,7 @@ from aiogram.types import Message
 from sqlalchemy import select
 
 from src.agents.profile_agent import ProfileAgent
-from src.db.models import User, UserState
+from src.db.models import User, UserState, Profile
 from src.db.session import async_session
 from src.services.claude import ClaudeService
 
@@ -75,7 +75,20 @@ async def handle_start_search(callback: CallbackQuery) -> None:
             return
 
         if user.profile_ready_for_search:
-            await callback.answer("Поиск уже запущен", show_alert=False)
+                await callback.answer("Поиск уже запущен", show_alert=False)
+                return
+
+        # Проверяем готовность профиля
+        from src.services.profile_validation import is_profile_ready
+
+        profile_result = await session.execute(
+            select(Profile).where(Profile.user_id == user.id)
+        )
+        profile = profile_result.scalar_one_or_none()
+        ready, reason = is_profile_ready(profile.profile_data if profile else None)
+
+        if not ready:
+            await callback.answer(reason, show_alert=True)
             return
 
         user.profile_ready_for_search = True

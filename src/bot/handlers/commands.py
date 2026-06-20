@@ -265,6 +265,19 @@ async def cmd_resume(message: Message) -> None:
         if user is None:
             await message.answer("Сначала напиши /start.")
             return
+        # Проверяем готовность профиля
+        from src.services.profile_validation import is_profile_ready
+
+        profile_result = await session.execute(
+            select(Profile).where(Profile.user_id == user.id)
+        )
+        profile = profile_result.scalar_one_or_none()
+        ready, reason = is_profile_ready(profile.profile_data if profile else None)
+
+        if not ready:
+            await message.answer(reason)
+            return
+
         user.is_active = True
         user.profile_ready_for_search = True
         await session.commit()

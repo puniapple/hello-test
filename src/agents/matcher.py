@@ -13,7 +13,7 @@ from src.sources.base import Vacancy
 logger = logging.getLogger(__name__)
 
 MATCHER_MODEL = "claude-haiku-4-5-20251001"
-DEFAULT_SCORE_THRESHOLD = 5.0
+DEFAULT_SCORE_THRESHOLD = 4.0
 MAX_DESCRIPTION_CHARS = 2500
 
 MATCHER_SYSTEM_PROMPT = """\
@@ -60,7 +60,7 @@ MATCHER_SYSTEM_PROMPT = """\
   "should_send": true/false
 }
 
-should_send=true если score >= 5.0.
+should_send=true если score >= 4.0.
 """
 
 
