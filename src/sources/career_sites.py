@@ -57,23 +57,6 @@ def _registry() -> dict[str, tuple]:
         "duolingo": ("Duolingo", "greenhouse", "duolingo"),
         "coursera": ("Coursera", "greenhouse", "coursera"),
 
-        # ─── Lever API ───
-        "eventbrite": ("Eventbrite", "lever", "eventbrite"),
-        "kayak": ("KAYAK", "lever", "kayak"),
-        "quora": ("Quora", "lever", "quora"),
-        "brex": ("Brex", "lever", "brex"),
-        "ramp": ("Ramp", "lever", "ramp"),
-        "mixpanel": ("Mixpanel", "lever", "mixpanel"),
-        "faire": ("Faire", "lever", "faire"),
-        "loom": ("Loom", "lever", "loom"),
-        "census": ("Census", "lever", "census"),
-        "hex": ("Hex", "lever", "hex"),
-        "fivetran": ("Fivetran", "lever", "fivetran"),
-        "whatnot": ("Whatnot", "lever", "whatnot"),
-        "cresta": ("Cresta", "lever", "cresta"),
-        "persona": ("Persona", "lever", "persona"),
-        "netflix": ("Netflix", "lever", "netflix"),
-
         # ─── Ashby API ───
         "notion": ("Notion", "ashby", "notion"),
         "linear": ("Linear", "ashby", "linear"),
