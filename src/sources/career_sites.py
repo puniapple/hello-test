@@ -91,6 +91,15 @@ def _registry() -> dict[str, tuple]:
         "railway": ("Railway", "ashby", "railway"),
         "elevenlabs": ("ElevenLabs", "ashby", "elevenlabs"),
 
+        # ─── Remote-доски с публичным API ───
+        "remoteok": ("RemoteOK", "remoteok", ""),
+        "remotive": ("Remotive", "remotive", ""),
+        "wwr_programming": ("We Work Remotely (Programming)", "wwr", "programming"),
+        "wwr_sales_marketing": ("We Work Remotely (Sales & Marketing)", "wwr", "sales-and-marketing"),
+        "wwr_customer_support": ("We Work Remotely (Customer Support)", "wwr", "customer-support"),
+        "wwr_product": ("We Work Remotely (Product)", "wwr", "product"),
+        "wwr_design": ("We Work Remotely (Design)", "wwr", "design"),
+
         # ─── Teamtailor HTML ───
         "sumsub": ("Sumsub", "teamtailor", "https://careers.sumsub.com/jobs", "sumsub"),
 
@@ -134,6 +143,16 @@ class CareerSiteSource(JobSource):
         if kind == "ashby":
             company_slug = entry[2]
             return await _fetch_ashby(company_slug, display_name)
+
+        if kind == "remoteok":
+            return await _fetch_remoteok()
+
+        if kind == "remotive":
+            return await _fetch_remotive()
+
+        if kind == "wwr":
+            category = entry[2]
+            return await _fetch_weworkremotely(category)
 
         if kind == "teamtailor":
             url, site_id = args
@@ -1238,6 +1257,204 @@ async def _fetch_ashby(company_slug: str, company_name: str) -> list[Vacancy]:
                 location=location,
                 published_at=job.get("publishedAt"),
                 raw={"site": f"ashby_{company_slug}", "department": department, "team": team},
+            )
+        )
+    return vacancies
+
+async def _fetch_remoteok() -> list[Vacancy]:
+    """Фетчер для RemoteOK через публичный JSON API.
+
+    Возвращает все свежие remote-вакансии (~500 активных).
+    """
+    api_url = "https://remoteok.com/api"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.get(api_url, headers={"User-Agent": USER_AGENT})
+            if response.status_code != 200:
+                return []
+            data = response.json()
+        except (httpx.HTTPError, ValueError):
+            return []
+
+    vacancies: list[Vacancy] = []
+    # Первый элемент массива — метаданные, пропускаем
+    items = data[1:] if data and isinstance(data, list) and len(data) > 0 else []
+
+    for job in items:
+        if not isinstance(job, dict):
+            continue
+        job_id = str(job.get("id", "") or job.get("slug", ""))
+        if not job_id:
+            continue
+
+        title = (job.get("position", "") or job.get("title", "")).strip()
+        company = (job.get("company", "") or "").strip()
+        url = (job.get("url", "") or job.get("apply_url", "")).strip()
+        if not title or not url:
+            continue
+
+        location = (job.get("location", "") or "Remote").strip()
+        tags = job.get("tags") or []
+        tags_str = ", ".join(t for t in tags if t) if isinstance(tags, list) else ""
+
+        # Description: HTML, чистим
+        desc_html = job.get("description", "")
+        if desc_html:
+            desc_soup = BeautifulSoup(desc_html, "html.parser")
+            description = desc_soup.get_text(" ", strip=True)[:2500]
+        else:
+            description = title
+
+        if tags_str:
+            description = f"Tags: {tags_str}\n{description}"
+
+        salary_min = job.get("salary_min")
+        salary_max = job.get("salary_max")
+        salary = None
+        if salary_min and salary_max:
+            salary = f"${salary_min:,} - ${salary_max:,}"
+        elif salary_min:
+            salary = f"from ${salary_min:,}"
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"remoteok:{job_id}",
+                source_type=SourceType.career_site,
+                title=title[:200],
+                company=company or "Remote",
+                url=url,
+                description=description,
+                salary=salary,
+                location=location,
+                published_at=job.get("date"),
+                raw={"site": "remoteok", "tags": tags_str},
+            )
+        )
+    return vacancies
+
+
+async def _fetch_remotive() -> list[Vacancy]:
+    """Фетчер для Remotive.com через публичный JSON API.
+
+    Возвращает все активные remote-вакансии из их базы.
+    """
+    api_url = "https://remotive.com/api/remote-jobs"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.get(api_url, headers={"User-Agent": USER_AGENT})
+            if response.status_code != 200:
+                return []
+            data = response.json()
+        except (httpx.HTTPError, ValueError):
+            return []
+
+    vacancies: list[Vacancy] = []
+    for job in data.get("jobs", []):
+        job_id = str(job.get("id", ""))
+        if not job_id:
+            continue
+
+        title = (job.get("title", "") or "").strip()
+        company = (job.get("company_name", "") or "").strip()
+        url = (job.get("url", "") or "").strip()
+        if not title or not url:
+            continue
+
+        category = (job.get("category", "") or "").strip()
+        job_type = (job.get("job_type", "") or "").strip()
+        location = (job.get("candidate_required_location", "") or "Remote").strip()
+
+        desc_html = job.get("description", "")
+        if desc_html:
+            desc_soup = BeautifulSoup(desc_html, "html.parser")
+            description = desc_soup.get_text(" ", strip=True)[:2500]
+        else:
+            description = title
+
+        meta_parts = [p for p in [category, job_type] if p]
+        if meta_parts:
+            description = f"{' / '.join(meta_parts)}\n{description}"
+
+        salary = (job.get("salary", "") or "").strip() or None
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"remotive:{job_id}",
+                source_type=SourceType.career_site,
+                title=title[:200],
+                company=company or "Remote",
+                url=url,
+                description=description,
+                salary=salary,
+                location=location,
+                published_at=job.get("publication_date"),
+                raw={"site": "remotive", "category": category},
+            )
+        )
+    return vacancies
+
+
+async def _fetch_weworkremotely(category: str) -> list[Vacancy]:
+    """Фетчер для We Work Remotely через RSS-фид.
+
+    Категории: programming, sales-and-marketing, customer-support, design, product, devops
+    """
+    import feedparser
+
+    feed_url = f"https://weworkremotely.com/categories/remote-{category}-jobs.rss"
+
+    # feedparser — синхронный, оборачиваем в asyncio.to_thread чтобы не блокировать loop
+    import asyncio as _asyncio
+    try:
+        feed = await _asyncio.to_thread(feedparser.parse, feed_url)
+    except Exception:
+        return []
+
+    vacancies: list[Vacancy] = []
+    for entry in feed.entries:
+        entry_id = str(entry.get("id", "") or entry.get("link", ""))
+        if not entry_id:
+            continue
+
+        title = (entry.get("title", "") or "").strip()
+        url = (entry.get("link", "") or "").strip()
+        if not title or not url:
+            continue
+
+        # В title обычно формат "Company: Job Title"
+        if ":" in title:
+            company, _, job_title = title.partition(":")
+            company = company.strip()
+            job_title = job_title.strip() or title
+        else:
+            company = "Remote"
+            job_title = title
+
+        # Description приходит в entry.summary как HTML
+        desc_html = entry.get("summary", "") or ""
+        if desc_html:
+            desc_soup = BeautifulSoup(desc_html, "html.parser")
+            description = desc_soup.get_text(" ", strip=True)[:2500]
+        else:
+            description = job_title
+
+        # Категория идёт в описание
+        description = f"Категория: {category}\n{description}"
+
+        published_at = entry.get("published") or entry.get("updated")
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"wwr_{category}:{entry_id}",
+                source_type=SourceType.career_site,
+                title=job_title[:200],
+                company=company,
+                url=url,
+                description=description,
+                salary=None,
+                location="Remote",
+                published_at=published_at,
+                raw={"site": f"wwr_{category}"},
             )
         )
     return vacancies
