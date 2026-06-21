@@ -83,6 +83,9 @@ def _registry() -> dict[str, tuple]:
         "wwr_product": ("We Work Remotely (Product)", "wwr", "product"),
         "wwr_design": ("We Work Remotely (Design)", "wwr", "design"),
 
+        # ─── Хабр Карьера через HTML ───
+        "habr_career": ("Хабр Карьера", "habr_career", ""),
+
         # ─── Teamtailor HTML ───
         "sumsub": ("Sumsub", "teamtailor", "https://careers.sumsub.com/jobs", "sumsub"),
 
@@ -129,6 +132,9 @@ class CareerSiteSource(JobSource):
 
         if kind == "remoteok":
             return await _fetch_remoteok()
+        
+        if kind == "habr_career":
+            return await _fetch_habr_career()
 
         if kind == "remotive":
             return await _fetch_remotive()
@@ -1440,6 +1446,118 @@ async def _fetch_weworkremotely(category: str) -> list[Vacancy]:
                 raw={"site": f"wwr_{category}"},
             )
         )
+    return vacancies
+
+async def _fetch_habr_career(query_filter: str = "all") -> list[Vacancy]:
+    """Парсер Хабр Карьеры через HTML страниц со списком вакансий.
+
+    query_filter: 'all' (все), 'suitable' (только подходящие)
+    Парсит 3 первых страницы (≈75 вакансий) — достаточно для свежего пула.
+    """
+    base_url = "https://career.habr.com"
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        for page in range(1, 4):  # страницы 1-3
+            url = f"{base_url}/vacancies?page={page}&type={query_filter}&sort=date"
+            try:
+                response = await client.get(
+                    url,
+                    headers={"User-Agent": USER_AGENT},
+                )
+                if response.status_code != 200:
+                    continue
+                html = response.text
+            except httpx.HTTPError:
+                continue
+
+            soup = BeautifulSoup(html, "html.parser")
+            cards = soup.find_all(class_="vacancy-card")
+
+            for card in cards:
+                # URL и external_id
+                title_link = card.find("a", class_="vacancy-card__title-link")
+                if not title_link:
+                    continue
+                href = title_link.get("href", "")
+                if not href.startswith("/vacancies/"):
+                    continue
+                vacancy_id = href.rsplit("/", 1)[-1]
+                if not vacancy_id or vacancy_id in seen_ids:
+                    continue
+                seen_ids.add(vacancy_id)
+
+                title = title_link.get_text(strip=True)
+                if not title:
+                    continue
+
+                full_url = f"{base_url}{href}"
+
+                # Компания
+                company_block = card.find("div", class_="vacancy-card__company")
+                company_link = (
+                    company_block.find("a", class_="link-comp")
+                    if company_block else None
+                )
+                company = (
+                    company_link.get_text(strip=True)
+                    if company_link else "Хабр Карьера"
+                )
+
+                # Дата публикации
+                published_at = None
+                time_el = card.find("time", class_="basic-date")
+                if time_el:
+                    published_at = time_el.get("datetime")
+
+                # Зарплата (если есть)
+                salary = None
+                salary_block = card.find(
+                    "div", class_="vacancy-card__salary"
+                ) or card.find("div", class_="basic-salary")
+                if salary_block:
+                    salary_text = salary_block.get_text(" ", strip=True)
+                    salary = salary_text if salary_text else None
+
+                # Meta: skills, seniority, локация, формат — всё в чипах
+                meta_block = card.find("div", class_="vacancy-card__meta")
+                meta_parts: list[str] = []
+                location = None
+                if meta_block:
+                    for chip in meta_block.find_all(
+                        "div", class_="basic-chip"
+                    ):
+                        chip_text = chip.get_text(" ", strip=True)
+                        if chip_text:
+                            meta_parts.append(chip_text)
+                    # Локация обычно отдельной ссылкой/спаном
+                    location_el = meta_block.find(
+                        "a", class_="link-comp"
+                    ) or meta_block.find("span", class_="link-comp")
+                    if location_el:
+                        location = location_el.get_text(strip=True) or None
+
+                # Собираем description из доступных частей
+                desc_parts = []
+                if meta_parts:
+                    desc_parts.append(" · ".join(meta_parts))
+                description = "\n".join(desc_parts) if desc_parts else title
+
+                vacancies.append(
+                    Vacancy(
+                        external_id=f"habr_career:{vacancy_id}",
+                        source_type=SourceType.career_site,
+                        title=title[:200],
+                        company=company,
+                        url=full_url,
+                        description=description,
+                        salary=salary,
+                        location=location,
+                        published_at=published_at,
+                        raw={"site": "habr_career", "vacancy_id": vacancy_id},
+                    )
+                )
     return vacancies
 
 async def _fetch_teamtailor(url: str, company_name: str, site_id: str) -> list[Vacancy]:
