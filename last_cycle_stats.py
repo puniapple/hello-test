@@ -6,8 +6,8 @@ from src.db.session import async_session, engine
 
 
 async def main():
-    # Берём матчи за последние 4 часа (с запасом, чтобы точно поймать последний цикл)
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=4)
+    # Берём матчи за последние 24 часа (с запасом, чтобы точно поймать последний цикл)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
 
     async with async_session() as s:
         # По юзерам: сколько каждому доставлено
@@ -26,7 +26,7 @@ async def main():
 
         total = sum(r.delivered for r in rows)
 
-        print(f"За последние 4 часа доставлено всего: {total} вакансий")
+        print(f"За последние 24 часа доставлено всего: {total} вакансий")
         print(f"Юзеров получили вакансии: {len(rows)}\n")
 
         if rows:
