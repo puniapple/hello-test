@@ -57,6 +57,40 @@ def _registry() -> dict[str, tuple]:
         "duolingo": ("Duolingo", "greenhouse", "duolingo"),
         "coursera": ("Coursera", "greenhouse", "coursera"),
 
+        # ─── Lever API ───
+        "eventbrite": ("Eventbrite", "lever", "eventbrite"),
+        "kayak": ("KAYAK", "lever", "kayak"),
+        "quora": ("Quora", "lever", "quora"),
+        "brex": ("Brex", "lever", "brex"),
+        "ramp": ("Ramp", "lever", "ramp"),
+        "mixpanel": ("Mixpanel", "lever", "mixpanel"),
+        "faire": ("Faire", "lever", "faire"),
+        "loom": ("Loom", "lever", "loom"),
+        "census": ("Census", "lever", "census"),
+        "hex": ("Hex", "lever", "hex"),
+        "fivetran": ("Fivetran", "lever", "fivetran"),
+        "whatnot": ("Whatnot", "lever", "whatnot"),
+        "cresta": ("Cresta", "lever", "cresta"),
+        "persona": ("Persona", "lever", "persona"),
+        "netflix": ("Netflix", "lever", "netflix"),
+
+        # ─── Ashby API ───
+        "notion": ("Notion", "ashby", "notion"),
+        "linear": ("Linear", "ashby", "linear"),
+        "posthog": ("PostHog", "ashby", "posthog"),
+        "replicate": ("Replicate", "ashby", "replicate"),
+        "cursor": ("Cursor", "ashby", "cursor"),
+        "perplexity": ("Perplexity", "ashby", "perplexity"),
+        "modal": ("Modal", "ashby", "modal"),
+        "pinecone": ("Pinecone", "ashby", "pinecone"),
+        "inngest": ("Inngest", "ashby", "inngest"),
+        "resend": ("Resend", "ashby", "resend"),
+        "trigger_dev": ("Trigger.dev", "ashby", "trigger"),
+        "supabase": ("Supabase", "ashby", "supabase"),
+        "liveblocks": ("Liveblocks", "ashby", "liveblocks"),
+        "railway": ("Railway", "ashby", "railway"),
+        "elevenlabs": ("ElevenLabs", "ashby", "elevenlabs"),
+
         # ─── Teamtailor HTML ───
         "sumsub": ("Sumsub", "teamtailor", "https://careers.sumsub.com/jobs", "sumsub"),
 
@@ -92,6 +126,14 @@ class CareerSiteSource(JobSource):
         if kind == "greenhouse":
             (company_slug,) = args
             return await _fetch_greenhouse(company_slug, display_name)
+        
+        if kind == "lever":
+            company_slug = entry[2]
+            return await _fetch_lever(company_slug, display_name)
+
+        if kind == "ashby":
+            company_slug = entry[2]
+            return await _fetch_ashby(company_slug, display_name)
 
         if kind == "teamtailor":
             url, site_id = args
@@ -1070,6 +1112,135 @@ async def _fetch_greenhouse(company_slug: str, company_name: str) -> list[Vacanc
         )
     return vacancies
 
+async def _fetch_lever(company_slug: str, company_name: str) -> list[Vacancy]:
+    """Универсальный фетчер для Lever ATS через публичный JSON API.
+
+    Покрывает компании: Eventbrite, KAYAK, Quora, Brex, Ramp, Mixpanel и многие другие.
+    """
+    api_url = f"https://api.lever.co/v0/postings/{company_slug}?mode=json"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.get(api_url, headers={"User-Agent": USER_AGENT})
+            if response.status_code != 200:
+                return []
+            data = response.json()
+        except (httpx.HTTPError, ValueError):
+            return []
+
+    vacancies: list[Vacancy] = []
+    for job in data:
+        job_id = str(job.get("id", ""))
+        if not job_id:
+            continue
+
+        title = job.get("text", "").strip()
+        url = job.get("hostedUrl", "").strip() or job.get("applyUrl", "").strip()
+        if not title or not url:
+            continue
+
+        categories = job.get("categories") or {}
+        location = categories.get("location", "").strip() or None
+        department = categories.get("department", "").strip()
+        team = categories.get("team", "").strip()
+
+        # Description: пробуем descriptionPlain, иначе чистим description (HTML)
+        description = (job.get("descriptionPlain") or "").strip()
+        if not description:
+            desc_html = job.get("description", "")
+            if desc_html:
+                desc_soup = BeautifulSoup(desc_html, "html.parser")
+                description = desc_soup.get_text(" ", strip=True)
+        description = description[:2500] if description else title
+
+        meta_parts = [p for p in [department, team] if p]
+        if meta_parts:
+            description = f"Отдел: {' / '.join(meta_parts)}\n{description}"
+
+        # createdAt у Lever приходит unix timestamp в миллисекундах
+        created_ms = job.get("createdAt")
+        published_at = None
+        if created_ms:
+            try:
+                from datetime import datetime, timezone
+                published_at = datetime.fromtimestamp(int(created_ms) / 1000, tz=timezone.utc).isoformat()
+            except (ValueError, TypeError):
+                published_at = None
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"lever_{company_slug}:{job_id}",
+                source_type=SourceType.career_site,
+                title=title[:200],
+                company=company_name,
+                url=url,
+                description=description,
+                salary=None,
+                location=location,
+                published_at=published_at,
+                raw={"site": f"lever_{company_slug}", "department": department, "team": team},
+            )
+        )
+    return vacancies
+
+
+async def _fetch_ashby(company_slug: str, company_name: str) -> list[Vacancy]:
+    """Универсальный фетчер для Ashby ATS через публичный JSON API.
+
+    Покрывает компании: Notion, Linear, Vercel, Posthog, Cursor, Perplexity и другие.
+    """
+    api_url = f"https://api.ashbyhq.com/posting-api/job-board/{company_slug}?includeCompensation=true"
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        try:
+            response = await client.get(api_url, headers={"User-Agent": USER_AGENT})
+            if response.status_code != 200:
+                return []
+            data = response.json()
+        except (httpx.HTTPError, ValueError):
+            return []
+
+    vacancies: list[Vacancy] = []
+    for job in data.get("jobs", []):
+        job_id = str(job.get("id", ""))
+        if not job_id:
+            continue
+
+        title = job.get("title", "").strip()
+        url = job.get("jobUrl", "").strip() or job.get("applyUrl", "").strip()
+        if not title or not url:
+            continue
+
+        location = job.get("location", "").strip() or None
+        department = job.get("department", "").strip()
+        team = job.get("team", "").strip()
+        employment_type = job.get("employmentType", "").strip()
+
+        # У Ashby description приходит в descriptionHtml
+        desc_html = job.get("descriptionHtml", "")
+        if desc_html:
+            desc_soup = BeautifulSoup(desc_html, "html.parser")
+            description = desc_soup.get_text(" ", strip=True)[:2500]
+        else:
+            description = title
+
+        meta_parts = [p for p in [department, team, employment_type] if p]
+        if meta_parts:
+            description = f"{' / '.join(meta_parts)}\n{description}"
+
+        vacancies.append(
+            Vacancy(
+                external_id=f"ashby_{company_slug}:{job_id}",
+                source_type=SourceType.career_site,
+                title=title[:200],
+                company=company_name,
+                url=url,
+                description=description,
+                salary=None,
+                location=location,
+                published_at=job.get("publishedAt"),
+                raw={"site": f"ashby_{company_slug}", "department": department, "team": team},
+            )
+        )
+    return vacancies
 
 async def _fetch_teamtailor(url: str, company_name: str, site_id: str) -> list[Vacancy]:
     """Универсальный фетчер для Teamtailor ATS через парсинг HTML.
