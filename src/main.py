@@ -13,6 +13,7 @@ from src.bot.handlers.cv_upload import router as cv_upload_router
 from src.bot.handlers.profile_edit import router as profile_edit_router
 from src.bot.handlers.reactions import router as reactions_router
 from src.bot.handlers.voice import router as voice_router
+from src.bot.handlers.admin import router as admin_router
 from src.config import settings
 from src.workers.job_search import run_job_search_cycle
 
@@ -56,6 +57,7 @@ async def main() -> None:
     dp.include_router(cv_upload_router)
     dp.include_router(voice_router)
     dp.include_router(profile_edit_router)
+    dp.include_router(admin_router)
 
     # Scheduled job search every 8 hours
     scheduler = AsyncIOScheduler()
