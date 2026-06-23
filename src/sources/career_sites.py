@@ -86,6 +86,9 @@ def _registry() -> dict[str, tuple]:
         # ─── Хабр Карьера через HTML ───
         "habr_career": ("Хабр Карьера", "habr_career", ""),
 
+        # ─── HireHi через HTML ───
+        "hirehi": ("HireHi", "html", "https://hirehi.ru/vacancies", _parse_hirehi),
+
         # ─── Teamtailor HTML ───
         "sumsub": ("Sumsub", "teamtailor", "https://careers.sumsub.com/jobs", "sumsub"),
 
@@ -135,6 +138,9 @@ class CareerSiteSource(JobSource):
         
         if kind == "habr_career":
             return await _fetch_habr_career()
+        
+        if kind == "hirehi":
+            return await _fetch_hirehi()
 
         if kind == "remotive":
             return await _fetch_remotive()
@@ -1805,4 +1811,95 @@ def _parse_lesta(html: str, base_url: str) -> list[Vacancy]:
                 raw={"site": "lesta", "category": category, "project": project},
             )
         )
+    return vacancies
+
+async def _fetch_hirehi() -> list[Vacancy]:
+    """Парсер HireHi.ru через HTML 5 категориальных страниц.
+
+    Каждая категория даёт ~27 вакансий, всего ~135 за цикл.
+    Title-атрибут ссылки содержит всё: "грейд позиция в компания, ЗП, локация".
+    Описаний на детальных страницах не тянем (N+1 не нужен).
+    """
+    base_url = "https://hirehi.ru"
+    categories = ["development", "marketing", "sales", "analytics", "management"]
+    grades = {"junior", "middle", "senior", "lead", "head", "principal", "intern"}
+
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        for category in categories:
+            url = f"{base_url}/vacancies/{category}"
+            try:
+                response = await client.get(
+                    url,
+                    headers={"User-Agent": USER_AGENT},
+                )
+                if response.status_code != 200:
+                    continue
+                html = response.text
+            except httpx.HTTPError:
+                continue
+
+            soup = BeautifulSoup(html, "html.parser")
+            container = soup.find("div", class_="jobs-row")
+            if not container:
+                continue
+
+            for link in container.find_all("a", href=True):
+                href = link.get("href", "")
+                m = re.search(r"-(\d+)$", href)
+                if not m:
+                    continue
+                vacancy_id = m.group(1)
+                if vacancy_id in seen_ids:
+                    continue
+                seen_ids.add(vacancy_id)
+
+                title_attr = (link.get("title") or "").strip()
+                if not title_attr:
+                    continue
+
+                # Парсим title: "middle fullstack developer в Buildern, ~ 210 201 ₽, офис Ереван"
+                position = title_attr
+                company = "HireHi"
+                salary = None
+                location = None
+                seniority = None
+
+                parts = [p.strip() for p in title_attr.split(",")]
+                head = parts[0]
+                if " в " in head:
+                    pos_part, comp = head.rsplit(" в ", 1)
+                    company = comp.strip() or "HireHi"
+                    tokens = pos_part.split(None, 1)
+                    if tokens and tokens[0].lower() in grades:
+                        seniority = tokens[0].lower()
+                        position = tokens[1].strip() if len(tokens) > 1 else pos_part
+                    else:
+                        position = pos_part.strip()
+
+                for p in parts[1:]:
+                    if any(c in p for c in "₽$€") and salary is None:
+                        salary = p
+                if len(parts) > 1 and not any(c in parts[-1] for c in "₽$€"):
+                    location = parts[-1]
+
+                title = f"{seniority} {position}" if seniority else position
+                full_url = f"{base_url}{href}"
+
+                vacancies.append(
+                    Vacancy(
+                        external_id=f"hirehi:{vacancy_id}",
+                        source_type=SourceType.career_site,
+                        title=title[:200],
+                        company=company,
+                        url=full_url,
+                        description=title_attr,
+                        salary=salary,
+                        location=location,
+                        published_at=None,
+                        raw={"site": "hirehi", "vacancy_id": vacancy_id, "category": category},
+                    )
+                )
     return vacancies
