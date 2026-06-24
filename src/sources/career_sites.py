@@ -87,7 +87,7 @@ def _registry() -> dict[str, tuple]:
         "habr_career": ("Хабр Карьера", "habr_career", ""),
 
         # ─── HireHi через HTML ───
-        "hirehi": ("HireHi", "html", "https://hirehi.ru/vacancies", _parse_hirehi),
+        "hirehi": ("HireHi", "hirehi", ""),
 
         # ─── Teamtailor HTML ───
         "sumsub": ("Sumsub", "teamtailor", "https://careers.sumsub.com/jobs", "sumsub"),
