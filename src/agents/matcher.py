@@ -78,12 +78,14 @@ class VacancyMatcher:
         self.threshold = threshold
 
     async def match(self, profile_data: dict, vacancy: Vacancy) -> MatchResult:
-        user_message = self._build_user_message(profile_data, vacancy)
+        user_message = self._build_user_message(vacancy)
+        profile_block = self._build_profile_block(profile_data)
 
         for attempt in range(2):
             response = await self.claude.chat(
                 messages=[{"role": "user", "content": user_message}],
                 system=MATCHER_SYSTEM_PROMPT,
+                extra_system_blocks=[profile_block],
                 max_tokens=512,
                 model=MATCHER_MODEL,
             )
@@ -103,11 +105,22 @@ class VacancyMatcher:
             should_send=False,
         )
 
-    def _build_user_message(self, profile_data: dict, vacancy: Vacancy) -> str:
+    def _build_profile_block(self, profile_data: dict) -> dict:
+        """Profile as a separately-cached system block.
+
+        Stays identical across all vacancy evaluations for one user in one cycle,
+        so Anthropic cache hits on every call after the first.
+        """
         profile_json = json.dumps(profile_data, ensure_ascii=False, indent=2)
+        return {
+            "type": "text",
+            "text": f"ПРОФИЛЬ ЮЗЕРА:\n{profile_json}",
+            "cache_control": {"type": "ephemeral"},
+        }
+
+    def _build_user_message(self, vacancy: Vacancy) -> str:
         description = (vacancy.description or "")[:MAX_DESCRIPTION_CHARS]
         return (
-            f"ПРОФИЛЬ ЮЗЕРА:\n{profile_json}\n\n"
             f"ВАКАНСИЯ:\n"
             f"Название: {vacancy.title}\n"
             f"Компания: {vacancy.company or 'не указана'}\n"
@@ -115,7 +128,7 @@ class VacancyMatcher:
             f"Зарплата: {vacancy.salary or 'не указана'}\n"
             f"Источник: {vacancy.source_type.value}\n"
             f"Описание:\n{description}\n\n"
-            f"Оцени соответствие. Верни JSON."
+            f"Оцени соответствие профилю выше. Верни JSON."
         )
 
     def _parse_response(self, text: str) -> MatchResult | None:

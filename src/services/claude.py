@@ -38,7 +38,9 @@ class ClaudeService:
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         model: str | None = None,
+        extra_system_blocks: list[dict[str, Any]] | None = None,
     ) -> ClaudeResponse:
+        
         """Send a chat request to Claude.
 
         messages — list of {"role": "user"|"assistant", "content": ...}
@@ -51,14 +53,19 @@ class ClaudeService:
             # остальные поля (max_tokens, temperature и т.д.) оставь как были
         }
 
-        if system:
-            kwargs["system"] = [
-                {
-                    "type": "text",
-                    "text": system,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
+        if system or extra_system_blocks:
+            blocks: list[dict[str, Any]] = []
+            if system:
+                blocks.append(
+                    {
+                        "type": "text",
+                        "text": system,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                )
+            if extra_system_blocks:
+                blocks.extend(extra_system_blocks)
+            kwargs["system"] = blocks
 
         if tools:
             kwargs["tools"] = [
