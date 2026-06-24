@@ -111,9 +111,11 @@ async def _process_user(bot: Bot, user: User) -> dict:
         if not fresh:
             return {"fetched": len(all_fetched), "matched": 0, "delivered": 0}
 
-        # 5. Cap how many we'll match (cost control), shuffle first для честной выборки
-        random.shuffle(fresh)
-        to_match = fresh[:MAX_VACANCIES_PER_USER_PER_CYCLE]
+        # 5. Rank by lexical overlap with profile, then cap. Niche users see
+        # their relevant vacancies even when the pool is broad.
+        from src.services.prefilter import rank_vacancies
+        ranked = rank_vacancies(fresh, profile.profile_data)
+        to_match = ranked[:MAX_VACANCIES_PER_USER_PER_CYCLE]
         deferred = fresh[MAX_VACANCIES_PER_USER_PER_CYCLE:]
         log.info("matching", count=len(to_match), deferred=len(deferred))
 
