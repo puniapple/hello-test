@@ -19,7 +19,7 @@ router = Router()
 
 
 WELCOME_TEXT = (
-    'Привет! Это <a href="https://t.me/puniapple_speaks">Ульяна</a>. '
+    'Привет! Это <a href="https://t.me/+O4j3RGUm50NjMmIy">Ульяна</a>. '
     'Я создала этого бота, потому что устала искать вакансию мечты на '
     'кладбище рынка труда.\n\n'
     'Что он умеет:\n\n'
