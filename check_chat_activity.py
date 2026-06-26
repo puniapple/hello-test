@@ -6,8 +6,8 @@ from src.db.models import ChatMessage, User
 
 
 async def main():
-    start = datetime(2026, 6, 23, 0, 0, 0, tzinfo=timezone.utc)
-    end = datetime(2026, 6, 24, 0, 0, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 6, 24, 0, 0, 0, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 25, 0, 0, 0, tzinfo=timezone.utc)
 
     async with async_session() as s:
         stmt = (
@@ -26,7 +26,7 @@ async def main():
         )
         rows = (await s.execute(stmt)).all()
 
-    print(f"\n📊 Активность с ботом 23 июня 2026 (UTC)\n")
+    print(f"\n📊 Активность с ботом 24 июня 2026 (UTC)\n")
     print(f"{'User':<25} {'Msgs':>5}  {'First UTC':<10} {'Last UTC':<10}")
     print("-" * 60)
     for r in rows:

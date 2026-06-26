@@ -66,6 +66,14 @@ class User(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     profile_ready_for_search: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # --- Tribute subscription fields ---
+    plan: Mapped[str] = mapped_column(String(32), default="free", server_default="free")
+    plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    subscription_status: Mapped[str] = mapped_column(String(32), default="free", server_default="free")
+    tribute_order_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    expiry_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -144,3 +152,18 @@ class VacancyMatch(Base):
         Enum(UserReaction, name="user_reaction"), nullable=True
     )
     
+class TributeWebhookEvent(Base):
+    __tablename__ = "tribute_webhook_events"
+    __table_args__ = (
+        UniqueConstraint("event_name", "order_uuid", "sent_at", name="uq_tribute_event"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_name: Mapped[str] = mapped_column(String(64))
+    order_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONB)
+    signature_valid: Mapped[bool] = mapped_column(Boolean)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
