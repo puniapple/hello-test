@@ -148,6 +148,9 @@ class VacancyMatch(Base):
     match_score: Mapped[float] = mapped_column(Float)
     match_reason: Mapped[str] = mapped_column(Text)
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     user_reaction: Mapped[UserReaction | None] = mapped_column(
         Enum(UserReaction, name="user_reaction"), nullable=True
     )

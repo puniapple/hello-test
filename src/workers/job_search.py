@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timezone, timedelta
 
 import structlog
 from aiogram import Bot
@@ -28,6 +29,13 @@ MAX_VACANCIES_PER_USER_PER_CYCLE = 50
 MAX_DELIVERIES_PER_USER_PER_CYCLE = 8
 USER_CONCURRENCY = 3
 MAX_VACANCIES_PER_SOURCE = 50
+# Buffer-mode test users (опытная группа). Через запятую в env.
+BUFFER_TEST_USERS = set(
+    int(x) for x in os.getenv("BUFFER_TEST_USERS", "").split(",") if x.strip()
+)
+
+# Сколько всего циклов в день (синхронизировать с scheduler в main.py)
+CYCLES_PER_DAY = int(os.getenv("CYCLES_PER_DAY", "3"))
 
 
 async def run_job_search_cycle(bot: Bot) -> dict:
@@ -75,6 +83,9 @@ async def run_job_search_cycle(bot: Bot) -> dict:
 async def _process_user(bot: Bot, user: User) -> dict:
     """Full pipeline for one user."""
     log = logger.bind(user_id=user.id, telegram_id=user.telegram_id)
+
+    if user.telegram_id in BUFFER_TEST_USERS:
+        return await _process_user_with_buffer(bot, user, log)
 
     # Subscription gate: если канал настроен и юзер отписался — пропускаем
     from src.services.subscription import is_required_channel_configured, is_subscribed
@@ -186,6 +197,225 @@ async def _process_user(bot: Bot, user: User) -> dict:
         log.info("user_done", delivered=sent_count)
         return {"fetched": len(all_fetched), "matched": len(to_match), "delivered": sent_count}
 
+async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
+    """Buffer-mode pipeline. Matching runs once per day (first cycle of the day),
+    delivery happens every cycle from the persistent buffer.
+
+    Buffer = VacancyMatch records with delivered_at IS NULL.
+    """
+    # Subscription gate (как в обычной функции)
+    from src.services.subscription import is_required_channel_configured, is_subscribed
+    if is_required_channel_configured():
+        subscribed = await is_subscribed(bot, user.telegram_id)
+        if not subscribed:
+            log.info("skip_not_subscribed_buffer")
+            return {"fetched": 0, "matched": 0, "delivered": 0}
+
+    now_utc = datetime.now(timezone.utc)
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    async with async_session() as session:
+        # Определяем: это первый цикл за день?
+        already_matched_today = (await session.execute(
+            select(func.count(VacancyMatch.id))
+            .where(VacancyMatch.user_id == user.id)
+            .where(VacancyMatch.sent_at >= today_start)
+        )).scalar() or 0
+
+        is_matching_cycle = already_matched_today == 0
+        log.info(
+            "buffer_cycle_decision",
+            is_matching_cycle=is_matching_cycle,
+            already_matched_today=already_matched_today,
+        )
+
+        # ─── Часть 1: матчинг (только в первом цикле дня) ───
+        matched_count = 0
+        fetched_count = 0
+        if is_matching_cycle:
+            # 1. Load profile
+            profile_result = await session.execute(
+                select(Profile).where(Profile.user_id == user.id)
+            )
+            profile = profile_result.scalar_one_or_none()
+            if profile is None or not profile.profile_data:
+                log.info("skip_no_profile_buffer")
+                # Не выходим — может быть в буфере есть что доставить
+            else:
+                # 2. Sources
+                sources = await list_user_sources(session, user.id)
+                if sources:
+                    # 3. Fetch
+                    all_fetched = await _fetch_from_all_sources(sources)
+                    fetched_count = len(all_fetched)
+                    log.info("fetched_buffer", count=fetched_count)
+
+                    # 4. Dedupe
+                    fresh = await filter_unseen(session, user.id, all_fetched)
+                    log.info("fresh_after_dedup_buffer", count=len(fresh))
+
+                    if fresh:
+                        # 5. Pre-filter + cap
+                        from src.services.prefilter import rank_vacancies
+                        ranked = rank_vacancies(fresh, profile.profile_data)
+                        to_match = ranked[:MAX_VACANCIES_PER_USER_PER_CYCLE]
+                        log.info("matching_buffer", count=len(to_match))
+
+                        # 6. Mark seen
+                        await mark_seen(session, user.id, to_match)
+                        await session.commit()
+
+                        # 7. Match each → save to buffer (delivered_at = NULL)
+                        matcher = VacancyMatcher()
+                        all_scores: list[float] = []
+                        for vacancy in to_match:
+                            try:
+                                match = await matcher.match(profile.profile_data, vacancy)
+                            except Exception as e:
+                                log.warning("match_failed_buffer", url=vacancy.url, error=str(e))
+                                continue
+                            all_scores.append(match.score)
+                            if match.should_send:
+                                # Сохраняем в буфер БЕЗ доставки
+                                vm = VacancyMatch(
+                                    user_id=user.id,
+                                    vacancy_hash=vacancy.hash,
+                                    vacancy_data=vacancy.to_storage_dict(),
+                                    match_score=match.score,
+                                    match_reason=match.fit_reason,
+                                    delivered_at=None,  # явно в буфере
+                                )
+                                session.add(vm)
+                                matched_count += 1
+
+                        if all_scores:
+                            buckets = {"9-10": 0, "8-9": 0, "7-8": 0, "6-7": 0, "5-6": 0, "4-5": 0, "<4": 0}
+                            for s in all_scores:
+                                if s >= 9: buckets["9-10"] += 1
+                                elif s >= 8: buckets["8-9"] += 1
+                                elif s >= 7: buckets["7-8"] += 1
+                                elif s >= 6: buckets["6-7"] += 1
+                                elif s >= 5: buckets["5-6"] += 1
+                                elif s >= 4: buckets["4-5"] += 1
+                                else: buckets["<4"] += 1
+                            log.info("score_distribution_buffer", **buckets)
+
+                        await session.commit()
+                        log.info("buffer_filled", new_in_buffer=matched_count)
+
+        # 8. Cleanup: удалить из буфера ваки старше 48 часов
+        expiry_cutoff = now_utc - timedelta(hours=48)
+        expired_result = await session.execute(
+            select(VacancyMatch)
+            .where(VacancyMatch.user_id == user.id)
+            .where(VacancyMatch.delivered_at.is_(None))
+            .where(VacancyMatch.sent_at < expiry_cutoff)
+        )
+        expired = expired_result.scalars().all()
+        for vm in expired:
+            await session.delete(vm)
+        if expired:
+            await session.commit()
+            log.info("buffer_expired_removed", count=len(expired))
+
+        # ─── Часть 2: доставка из буфера (всегда) ───
+        # Загружаем весь буфер юзера, отсортированный по скору
+        buffer_result = await session.execute(
+            select(VacancyMatch)
+            .where(VacancyMatch.user_id == user.id)
+            .where(VacancyMatch.delivered_at.is_(None))
+            .order_by(VacancyMatch.match_score.desc())
+        )
+        buffer = buffer_result.scalars().all()
+        log.info("buffer_size", count=len(buffer))
+
+        # Сколько циклов осталось до конца дня (включая текущий)
+        cycles_done_today = already_matched_today  # 0 если это первый
+        if is_matching_cycle:
+            # Только что отработали матчинг — это и есть первый цикл
+            remaining_cycles = CYCLES_PER_DAY
+        else:
+            # Считаем сколько циклов уже было сегодня
+            delivered_today = (await session.execute(
+                select(func.count(VacancyMatch.id))
+                .where(VacancyMatch.user_id == user.id)
+                .where(VacancyMatch.delivered_at >= today_start)
+            )).scalar() or 0
+            # Грубая оценка: цикл = группа доставок в течение часа
+            # Считаем что между циклами >1 часа
+            cycles_done = await _estimate_cycles_done(session, user.id, today_start, now_utc)
+            remaining_cycles = max(1, CYCLES_PER_DAY - cycles_done)
+
+        # Сколько отправить сейчас
+        if len(buffer) == 0:
+            to_send_now = 0
+        else:
+            # Равномерное распределение, минимум 1 если есть ваки
+            to_send_now = max(1, len(buffer) // remaining_cycles)
+            # Крышка — Pro 5, Free 3. На тесте у тебя Pro.
+            to_send_now = min(to_send_now, 5)
+
+        log.info(
+            "delivery_plan",
+            buffer=len(buffer),
+            remaining_cycles=remaining_cycles,
+            to_send_now=to_send_now,
+        )
+
+        # Доставляем
+        sent_count = 0
+        for vm in buffer[:to_send_now]:
+            try:
+                # Восстанавливаем Vacancy из vacancy_data для format_vacancy_message
+                vacancy = Vacancy.from_storage_dict(vm.vacancy_data)
+                match_result = MatchResult(
+                    score=vm.match_score,
+                    fit_reason=vm.match_reason,
+                    red_flags=[],
+                    should_send=True,
+                )
+
+                await bot.send_message(
+                    chat_id=user.telegram_id,
+                    text=format_vacancy_message(vacancy, match_result),
+                    reply_markup=build_reaction_keyboard(vm.id),
+                    parse_mode="MarkdownV2",
+                    disable_web_page_preview=False,
+                )
+                vm.delivered_at = now_utc
+                sent_count += 1
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                log.warning("delivery_failed_buffer", url=vm.vacancy_data.get("url"), error=str(e))
+                continue
+
+        await session.commit()
+        log.info("user_done_buffer", delivered=sent_count, buffer_remaining=len(buffer) - sent_count)
+        return {"fetched": fetched_count, "matched": matched_count, "delivered": sent_count}
+
+
+async def _estimate_cycles_done(session, user_id: int, today_start, now_utc) -> int:
+    """Грубо оцениваем сколько циклов доставки уже было сегодня.
+    Цикл = группа доставок в окне 1 час.
+    """
+    result = await session.execute(
+        select(VacancyMatch.delivered_at)
+        .where(VacancyMatch.user_id == user_id)
+        .where(VacancyMatch.delivered_at >= today_start)
+        .order_by(VacancyMatch.delivered_at)
+    )
+    timestamps = [r[0] for r in result.all()]
+    if not timestamps:
+        return 0
+
+    # Считаем количество "кластеров" доставок — между группами >1 часа
+    cycles = 1
+    prev = timestamps[0]
+    for ts in timestamps[1:]:
+        if (ts - prev) > timedelta(hours=1):
+            cycles += 1
+        prev = ts
+    return cycles
 
 async def _fetch_from_all_sources(sources: list[Source]) -> list[Vacancy]:
     """Fetch from every source in parallel, with per-source cap and timeout."""

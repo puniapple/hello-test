@@ -6,11 +6,39 @@ from src.db.session import async_session, engine
 
 
 async def main():
-    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
-    cutoff_7d = datetime.now(timezone.utc) - timedelta(days=7)
+    now_utc = datetime.now(timezone.utc)
+    cutoff_24h = now_utc - timedelta(hours=24)
+    cutoff_7d = now_utc - timedelta(days=7)
+
+    # Границы календарных дней (UTC) за последнюю неделю
+    today_start = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
 
     async with async_session() as s:
-        # Все активные юзеры
+        # ─── Сводка по календарным дням ───
+        print("📊 Доставлено по календарным дням (UTC):\n")
+
+        # Сегодня — неполный день, отдельно
+        delivered_today = (await s.execute(
+            select(func.count(VacancyMatch.id))
+            .where(VacancyMatch.sent_at >= today_start)
+        )).scalar()
+        print(f"  {today_start.strftime('%Y-%m-%d')} (сегодня, с 00:00 UTC): {delivered_today}")
+
+        # Последние 7 полных календарных дней
+        for days_ago in range(1, 8):
+            day_start = today_start - timedelta(days=days_ago)
+            day_end = today_start - timedelta(days=days_ago - 1)
+
+            delivered = (await s.execute(
+                select(func.count(VacancyMatch.id))
+                .where(VacancyMatch.sent_at >= day_start)
+                .where(VacancyMatch.sent_at < day_end)
+            )).scalar()
+            print(f"  {day_start.strftime('%Y-%m-%d')}: {delivered}")
+
+        print()
+
+        # ─── Все активные юзеры ───
         result = await s.execute(
             select(User)
             .where(User.is_active.is_(True))
