@@ -63,7 +63,7 @@ async def main() -> None:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         run_job_search_cycle,
-        trigger=CronTrigger(hour="9, 15, 21"),
+        trigger=CronTrigger(hour="12, 15, 21"),
         args=[bot],
         id="job_search_cycle",
         max_instances=1,
