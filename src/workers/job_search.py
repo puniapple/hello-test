@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 import structlog
 from aiogram import Bot
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.matcher import MatchResult, VacancyMatcher
