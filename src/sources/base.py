@@ -58,6 +58,25 @@ class Vacancy:
             "published_at": self.published_at,
         }
 
+    @classmethod
+    def from_storage_dict(cls, data: dict[str, Any]) -> "Vacancy":
+        """Восстановить Vacancy из dict, сохранённого через to_storage_dict."""
+        source_type = data["source_type"]
+        if isinstance(source_type, str):
+            source_type = SourceType(source_type)
+        return cls(
+            external_id=data["external_id"],
+            source_type=source_type,
+            title=data["title"],
+            company=data.get("company"),
+            url=data["url"],
+            description=data["description"],
+            salary=data.get("salary"),
+            location=data.get("location"),
+            published_at=data.get("published_at"),
+            raw=data.get("raw", {}),
+        )
+
 
 class JobSource(ABC):
     """Abstract base for any source of vacancies."""
