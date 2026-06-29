@@ -11,6 +11,8 @@ from bs4 import BeautifulSoup, Tag
 from src.db.models import Source, SourceType
 from src.sources.base import JobSource, Vacancy
 
+import asyncio
+
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
@@ -1813,6 +1815,8 @@ def _parse_lesta(html: str, base_url: str) -> list[Vacancy]:
 async def _fetch_hirehi() -> list[Vacancy]:
     """Парсер HireHi.ru через HTML 5 категориальных страниц.
 
+    5 категорий тянутся параллельно через asyncio.gather, общее время
+    ≈ время самой медленной категории, а не сумма.
     Каждая категория даёт ~27 вакансий, всего ~135 за цикл.
     Title-атрибут ссылки содержит всё: "грейд позиция в компания, ЗП, локация".
     Описаний на детальных страницах не тянем (N+1 не нужен).
@@ -1821,82 +1825,85 @@ async def _fetch_hirehi() -> list[Vacancy]:
     categories = ["development", "marketing", "sales", "analytics", "management"]
     grades = {"junior", "middle", "senior", "lead", "head", "principal", "intern"}
 
+    async def fetch_one(client: httpx.AsyncClient, category: str) -> tuple[str, str]:
+        url = f"{base_url}/vacancies/{category}"
+        try:
+            response = await client.get(url, headers={"User-Agent": USER_AGENT})
+            if response.status_code != 200:
+                return category, ""
+            return category, response.text
+        except httpx.HTTPError:
+            return category, ""
+
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+        pages = await asyncio.gather(*(fetch_one(client, c) for c in categories))
+
     vacancies: list[Vacancy] = []
     seen_ids: set[str] = set()
 
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        for category in categories:
-            url = f"{base_url}/vacancies/{category}"
-            try:
-                response = await client.get(
-                    url,
-                    headers={"User-Agent": USER_AGENT},
-                )
-                if response.status_code != 200:
-                    continue
-                html = response.text
-            except httpx.HTTPError:
+    for category, html in pages:
+        if not html:
+            continue
+
+        soup = BeautifulSoup(html, "html.parser")
+        container = soup.find("div", class_="jobs-row")
+        if not container:
+            continue
+
+        for link in container.find_all("a", href=True):
+            href = link.get("href", "")
+            m = re.search(r"-(\d+)$", href)
+            if not m:
+                continue
+            vacancy_id = m.group(1)
+            if vacancy_id in seen_ids:
+                continue
+            seen_ids.add(vacancy_id)
+
+            title_attr = (link.get("title") or "").strip()
+            if not title_attr:
                 continue
 
-            soup = BeautifulSoup(html, "html.parser")
-            container = soup.find("div", class_="jobs-row")
-            if not container:
-                continue
+            # Парсим title: "middle fullstack developer в Buildern, ~ 210 201 ₽, офис Ереван"
+            position = title_attr
+            company = "HireHi"
+            salary = None
+            location = None
+            seniority = None
 
-            for link in container.find_all("a", href=True):
-                href = link.get("href", "")
-                m = re.search(r"-(\d+)$", href)
-                if not m:
-                    continue
-                vacancy_id = m.group(1)
-                if vacancy_id in seen_ids:
-                    continue
-                seen_ids.add(vacancy_id)
+            parts = [p.strip() for p in title_attr.split(",")]
+            head = parts[0]
+            if " в " in head:
+                pos_part, comp = head.rsplit(" в ", 1)
+                company = comp.strip() or "HireHi"
+                tokens = pos_part.split(None, 1)
+                if tokens and tokens[0].lower() in grades:
+                    seniority = tokens[0].lower()
+                    position = tokens[1].strip() if len(tokens) > 1 else pos_part
+                else:
+                    position = pos_part.strip()
 
-                title_attr = (link.get("title") or "").strip()
-                if not title_attr:
-                    continue
+            for p in parts[1:]:
+                if any(c in p for c in "₽$€") and salary is None:
+                    salary = p
+            if len(parts) > 1 and not any(c in parts[-1] for c in "₽$€"):
+                location = parts[-1]
 
-                # Парсим title: "middle fullstack developer в Buildern, ~ 210 201 ₽, офис Ереван"
-                position = title_attr
-                company = "HireHi"
-                salary = None
-                location = None
-                seniority = None
+            title = f"{seniority} {position}" if seniority else position
+            full_url = f"{base_url}{href}"
 
-                parts = [p.strip() for p in title_attr.split(",")]
-                head = parts[0]
-                if " в " in head:
-                    pos_part, comp = head.rsplit(" в ", 1)
-                    company = comp.strip() or "HireHi"
-                    tokens = pos_part.split(None, 1)
-                    if tokens and tokens[0].lower() in grades:
-                        seniority = tokens[0].lower()
-                        position = tokens[1].strip() if len(tokens) > 1 else pos_part
-                    else:
-                        position = pos_part.strip()
-
-                for p in parts[1:]:
-                    if any(c in p for c in "₽$€") and salary is None:
-                        salary = p
-                if len(parts) > 1 and not any(c in parts[-1] for c in "₽$€"):
-                    location = parts[-1]
-
-                title = f"{seniority} {position}" if seniority else position
-                full_url = f"{base_url}{href}"
-
-                vacancies.append(
-                    Vacancy(
-                        external_id=f"hirehi:{vacancy_id}",
-                        source_type=SourceType.career_site,
-                        title=title[:200],
-                        company=company,
-                        url=full_url,
-                        description=title_attr,
-                        salary=salary,
-                        location=location,
-                        published_at=None,
-                        raw={"site": "hirehi", "vacancy_id": vacancy_id, "category": category},
-                    )
+            vacancies.append(
+                Vacancy(
+                    external_id=f"hirehi:{vacancy_id}",
+                    source_type=SourceType.career_site,
+                    title=title[:200],
+                    company=company,
+                    url=full_url,
+                    description=title_attr,
+                    salary=salary,
+                    location=location,
+                    published_at=None,
+                    raw={"site": "hirehi", "vacancy_id": vacancy_id, "category": category},
                 )
+            )
     return vacancies
