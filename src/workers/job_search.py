@@ -221,17 +221,14 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
 
     async with async_session() as session:
         # Определяем: это первый цикл за день?
-        already_matched_today = (await session.execute(
-            select(func.count(VacancyMatch.id))
-            .where(VacancyMatch.user_id == user.id)
-            .where(VacancyMatch.sent_at >= today_start)
-        )).scalar() or 0
-
-        is_matching_cycle = already_matched_today == 0
+        is_matching_cycle = (
+            user.last_match_cycle_at is None
+            or user.last_match_cycle_at < today_start
+        )
         log.info(
             "buffer_cycle_decision",
             is_matching_cycle=is_matching_cycle,
-            already_matched_today=already_matched_today,
+            last_match_cycle_at=str(user.last_match_cycle_at) if user.last_match_cycle_at else None,
         )
 
         # ─── Часть 1: матчинг (только в первом цикле дня) ───
@@ -307,6 +304,11 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
 
                         await session.commit()
                         log.info("buffer_filled", new_in_buffer=matched_count)
+
+                        # Записываем что матчинг сегодня уже был — даже если в буфер ничего не легло
+                        user.last_match_cycle_at = now_utc
+                        await session.commit()
+
 
         # 8. Cleanup: удалить из буфера ваки старше 48 часов
         expiry_cutoff = now_utc - timedelta(hours=48)

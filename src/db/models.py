@@ -65,6 +65,9 @@ class User(Base):
         Enum(UserState, name="user_state"), default=UserState.idle
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_match_cycle_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     profile_ready_for_search: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # --- Tribute subscription fields ---
     plan: Mapped[str] = mapped_column(String(32), default="free", server_default="free")
