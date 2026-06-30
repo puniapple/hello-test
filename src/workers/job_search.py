@@ -30,6 +30,7 @@ MAX_DELIVERIES_PER_USER_PER_CYCLE = 8
 USER_CONCURRENCY = 3
 MAX_VACANCIES_PER_SOURCE = 50
 # Buffer-mode test users (опытная группа). Через запятую в env.
+BUFFER_MODE = os.getenv("BUFFER_MODE", "off").lower()
 BUFFER_TEST_USERS = set(
     int(x) for x in os.getenv("BUFFER_TEST_USERS", "").split(",") if x.strip()
 )
@@ -84,7 +85,11 @@ async def _process_user(bot: Bot, user: User) -> dict:
     """Full pipeline for one user."""
     log = logger.bind(user_id=user.id, telegram_id=user.telegram_id)
 
-    if user.telegram_id in BUFFER_TEST_USERS:
+    use_buffer = (
+        BUFFER_MODE == "all"
+        or (BUFFER_MODE == "test" and user.telegram_id in BUFFER_TEST_USERS)
+    )
+    if use_buffer:
         return await _process_user_with_buffer(bot, user, log)
 
     # Subscription gate: если канал настроен и юзер отписался — пропускаем
