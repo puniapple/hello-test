@@ -63,7 +63,7 @@ async def main() -> None:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
         run_job_search_cycle,
-        trigger=CronTrigger(hour="9, 11, 21"),
+        trigger=CronTrigger(hour="9, 15, 21"),
         args=[bot],
         id="job_search_cycle",
         max_instances=1,
@@ -71,7 +71,7 @@ async def main() -> None:
         misfire_grace_time=600,
     )
     scheduler.start()
-    log.info("scheduler_started", interval="3x daily at 9/11/21 UTC")
+    log.info("scheduler_started", interval="3x daily at 9/15/21 UTC")
 
     log.info("polling_started")
     try:
