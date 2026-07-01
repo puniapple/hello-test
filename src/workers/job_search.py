@@ -337,17 +337,10 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
         log.info("buffer_size", count=len(buffer))
 
         # Сколько циклов осталось до конца дня (включая текущий)
-        cycles_done_today = already_matched_today  # 0 если это первый
         if is_matching_cycle:
             # Только что отработали матчинг — это и есть первый цикл
             remaining_cycles = CYCLES_PER_DAY
         else:
-            # Считаем сколько циклов уже было сегодня
-            delivered_today = (await session.execute(
-                select(func.count(VacancyMatch.id))
-                .where(VacancyMatch.user_id == user.id)
-                .where(VacancyMatch.delivered_at >= today_start)
-            )).scalar() or 0
             # Грубая оценка: цикл = группа доставок в течение часа
             # Считаем что между циклами >1 часа
             cycles_done = await _estimate_cycles_done(session, user.id, today_start, now_utc)
