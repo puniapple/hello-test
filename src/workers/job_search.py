@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 import structlog
 from aiogram import Bot
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.matcher import MatchResult, VacancyMatcher
@@ -306,8 +306,14 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
                         log.info("buffer_filled", new_in_buffer=matched_count)
 
                         # Записываем что матчинг сегодня уже был — даже если в буфер ничего не легло
-                        user.last_match_cycle_at = now_utc
+                        await session.execute(
+                            update(User)
+                            .where(User.id == user.id)
+                            .values(last_match_cycle_at=now_utc)
+                        )
                         await session.commit()
+                        # Синхронизируем объект user в памяти для последующих проверок в этом цикле
+                        user.last_match_cycle_at = now_utc
 
 
         # 8. Cleanup: удалить из буфера ваки старше 48 часов
