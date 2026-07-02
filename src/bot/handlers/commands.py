@@ -36,7 +36,6 @@ WELCOME_TEXT = (
     '/edit_profile — собрать или обновить профиль\n'
     '/show_profile — показать текущий профиль\n'
     '/done — выйти из режима редактирования\n'
-    '/run_now — запустить поиск прямо сейчас\n'
     '/stats — твоя статистика\n'
     '/pause — поставить на паузу\n'
     '/resume — возобновить\n\n'
@@ -195,8 +194,6 @@ async def cmd_show_profile(message: Message) -> None:
 
     parts.append("")
     parts.append("Хочешь дополнить — /edit_profile")
-    if not user.profile_ready_for_search:
-        parts.append("Запустить поиск — /run_now")
 
     text = "\n".join(parts)
     if len(text) > 3900:
@@ -346,7 +343,7 @@ def format_profile(data: dict) -> str:
 
     return "\n".join(parts)
 
-@router.message(Command("run_now"))
+#@router.message(Command("run_now"))
 async def cmd_run_now(message: Message) -> None:
     """Manually trigger a job search cycle for this user only.
 
@@ -361,16 +358,16 @@ async def cmd_run_now(message: Message) -> None:
         await message.answer("Сначала напиши /start.")
         return
 
-    @router.message(Command("run_now"))
-    async def cmd_run_now(message: Message) -> None:
-        async with async_session() as session:
-            result = await session.execute(
-                select(User).where(User.telegram_id == message.from_user.id)
-            )
-            user = result.scalar_one_or_none()
-        if user is None:
-            await message.answer("Сначала напиши /start.")
-            return
+    #@router.message(Command("run_now"))
+    #async def cmd_run_now(message: Message) -> None:
+    #    async with async_session() as session:
+    #        result = await session.execute(
+    #            select(User).where(User.telegram_id == message.from_user.id)
+    #        )
+    #        user = result.scalar_one_or_none()
+    #    if user is None:
+    #        await message.answer("Сначала напиши /start.")
+    #        return
 
     # Проверка подписки
     if is_required_channel_configured():
