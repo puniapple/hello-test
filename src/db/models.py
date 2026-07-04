@@ -73,7 +73,7 @@ class User(Base):
     plan: Mapped[str] = mapped_column(String(32), default="free", server_default="free")
     plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subscription_status: Mapped[str] = mapped_column(String(32), default="free", server_default="free")
-    tribute_order_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    tribute_subscription_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     expiry_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
