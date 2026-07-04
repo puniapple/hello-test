@@ -1,4 +1,4 @@
-"""HTTP server для приёма webhook'ов от Tribute.
+"""HTTP server для приёма webhook'ов от Tribute Subscriptions.
 
 Запускается параллельно с polling бота, слушает на /webhooks/tribute и /health.
 """
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Optional
 
 import structlog
 from aiogram import Bot
@@ -19,13 +19,9 @@ from src.config import settings
 from src.db.models import TributeWebhookEvent
 from src.db.session import engine
 from src.services.billing import (
-    handle_cancelled,
-    handle_charge_failed,
-    handle_charge_success,
-    handle_payment_failed,
-    handle_payment_received,
-    handle_refunded,
-    is_recurring_payload,
+    handle_cancelled_subscription,
+    handle_new_subscription,
+    handle_renewed_subscription,
 )
 from src.services.tribute import get_tribute_client
 
@@ -34,69 +30,35 @@ log = structlog.get_logger(__name__)
 
 # Маппинг event name -> обработчик
 EVENT_HANDLERS = {
-    "shopOrderPaymentReceived": handle_payment_received,
-    "shopOrder": handle_payment_received,  # на случай если общий event тоже шлётся
-    "shopOrderChargeSuccess": handle_charge_success,
-    "shopOrderChargeFailed": handle_charge_failed,
-    "shopOrderPaymentFailed": handle_payment_failed,
-    "shopOrderCancelled": handle_cancelled,
-    "shopOrderRefunded": handle_refunded,
+    "new_subscription": handle_new_subscription,
+    "renewed_subscription": handle_renewed_subscription,
+    "cancelled_subscription": handle_cancelled_subscription,
 }
 
 
-# Сообщения для подписочных юзеров (с автопродлением)
-USER_MESSAGES_RECURRING = {
-    "payment_received": (
-        "✨ Оплата получена. Pro подписка активирована до {expires:%d.%m.%Y}.\n\n"
-        "Теперь матчинг идёт три раза в день, до 8 вакансий за цикл. "
-        "Дальше карта будет продлеваться сама — отменить можно в любой момент через /cancel_subscription."
+# Сообщения юзерам по событиям
+USER_MESSAGES = {
+    "new_subscription": (
+        "✨ Оплата получена. Pro активирован до {expires:%d.%m.%Y}.\n\n"
+        "Теперь я буду искать вакансии для тебя чаще — несколько раз в день, "
+        "до 8 вакансий за подборку. Подписка продлевается автоматически, "
+        "отменить можно в любой момент через /cancel_subscription."
     ),
-    "charge_success": (
+    "renewed_subscription": (
         "💎 Подписка продлена ещё на месяц. Pro до {expires:%d.%m.%Y}.\n"
         "Спасибо что остаёшься со мной."
     ),
-    "charge_failed": (
-        "⚠️ Не получилось списать оплату с карты.\n"
-        "Tribute попробует ещё пару раз в течение ближайших часов. "
-        "Если хочешь — обнови способ оплаты в @tribute."
-    ),
-    "payment_failed": (
-        "⚠️ Платёж не прошёл. Попробуй ещё раз через /upgrade."
-    ),
-    "cancelled": (
+    "cancelled_subscription": (
         "Подписка отменена. Доступ к Pro останется до {expires:%d.%m.%Y}.\n"
         "Возвращайся когда захочешь — /upgrade всё ещё ждёт."
-    ),
-    "refunded": (
-        "Возврат оформлен. Pro отключён, бот вернулся в бесплатный режим."
-    ),
-}
-
-
-# Сообщения для разовых юзеров (без автопродления)
-USER_MESSAGES_ONETIME = {
-    "payment_received": (
-        "✨ Оплата получена. Pro активирован до {expires:%d.%m.%Y}.\n\n"
-        "Теперь матчинг идёт три раза в день, до 8 вакансий за цикл. "
-        "Это разовый платёж — карта не привязана, по истечении 30 дней нужно будет купить снова."
-    ),
-    "payment_failed": (
-        "⚠️ Платёж не прошёл. Попробуй ещё раз через /upgrade."
-    ),
-    "refunded": (
-        "Возврат оформлен. Pro отключён, бот вернулся в бесплатный режим."
     ),
 }
 
 
 EVENT_TO_MESSAGE_KEY = {
-    "shopOrderPaymentReceived": "payment_received",
-    "shopOrder": "payment_received",
-    "shopOrderChargeSuccess": "charge_success",
-    "shopOrderChargeFailed": "charge_failed",
-    "shopOrderPaymentFailed": "payment_failed",
-    "shopOrderCancelled": "cancelled",
-    "shopOrderRefunded": "refunded",
+    "new_subscription": "new_subscription",
+    "renewed_subscription": "renewed_subscription",
+    "cancelled_subscription": "cancelled_subscription",
 }
 
 
@@ -110,7 +72,7 @@ async def _record_event(
 ) -> bool:
     """Записать event в БД с idempotency.
 
-    Возвращает True если запись новая, False если дубль (тогда обрабатывать не нужно).
+    Возвращает True если запись новая, False если дубль (Tribute ретраит до 24ч).
     """
     stmt = (
         insert(TributeWebhookEvent)
@@ -133,10 +95,8 @@ async def _record_event(
 def _parse_envelope(envelope: dict) -> tuple[str, dict, datetime]:
     """Разобрать обёртку webhook'а в (event_name, payload, sent_at).
 
-    Формат envelope ожидаем такой (по аналогии с Digital Products API):
-    { "name": "...", "created_at": "...", "sent_at": "...", "payload": {...} }
-
-    Если Shop API использует другой формат — первый реальный webhook покажет в логах.
+    Формат Tribute Subscriptions:
+    { "name": "new_subscription", "created_at": "...", "sent_at": "...", "payload": {...} }
     """
     event_name = envelope.get("name") or envelope.get("event") or "unknown"
     payload = envelope.get("payload") or envelope
@@ -178,7 +138,11 @@ async def tribute_webhook(request: web.Request) -> web.Response:
         return web.Response(status=400, text="invalid json")
 
     event_name, payload, sent_at = _parse_envelope(envelope)
-    order_uuid = payload.get("uuid") if isinstance(payload, dict) else None
+
+    # В subscriptions webhook'ах уникальный id — subscription_id (integer).
+    # Используем его как order_uuid для идемпотентности (поле VARCHAR — влезет строка).
+    subscription_id = payload.get("subscription_id") if isinstance(payload, dict) else None
+    event_key = str(subscription_id) if subscription_id else None
 
     session_factory: async_sessionmaker[AsyncSession] = request.app["session_factory"]
     bot: Bot = request.app["bot"]
@@ -186,13 +150,13 @@ async def tribute_webhook(request: web.Request) -> web.Response:
     # 3. Idempotency + диспетчер
     async with session_factory() as session:
         is_new = await _record_event(
-            session, event_name, order_uuid, sent_at, payload, is_valid
+            session, event_name, event_key, sent_at, payload, is_valid
         )
         if not is_new:
-            log.info("tribute_event_duplicate", event=event_name, uuid=order_uuid)
+            log.info("tribute_event_duplicate", event=event_name, subscription_id=subscription_id)
             return web.Response(status=200, text="duplicate")
 
-        log.info("tribute_event_received", event=event_name, uuid=order_uuid)
+        log.info("tribute_event_received", event=event_name, subscription_id=subscription_id)
 
         handler = EVENT_HANDLERS.get(event_name)
         if not handler:
@@ -203,7 +167,7 @@ async def tribute_webhook(request: web.Request) -> web.Response:
             telegram_id = await handler(session, payload)
         except Exception:
             log.exception("tribute_handler_error", event=event_name)
-            # Возвращаем 200 чтобы Tribute не ретраил 24 часа — ошибка уже в логах
+            # 200 чтобы Tribute не ретраил 24 часа — ошибка уже в логах
             return web.Response(status=200, text="handler error, swallowed")
 
     # 4. Уведомить юзера
@@ -225,17 +189,13 @@ async def _notify_user(
         if not message_key:
             return
 
-        # Выбираем набор сообщений в зависимости от типа подписки
-        recurring = is_recurring_payload(payload)
-        messages = USER_MESSAGES_RECURRING if recurring else USER_MESSAGES_ONETIME
-
-        template = messages.get(message_key)
+        template = USER_MESSAGES.get(message_key)
         if not template:
-            return  # для разовой нет смысла слать события про продление/отмену
+            return
 
-        # Парсим memberExpiresAt или считаем по периоду
+        # Парсим expires_at или считаем от now
         expires = None
-        expires_raw = payload.get("memberExpiresAt")
+        expires_raw = payload.get("expires_at")
         if expires_raw:
             try:
                 expires = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
