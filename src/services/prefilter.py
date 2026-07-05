@@ -24,6 +24,13 @@ _PROFILE_TEXT_FIELDS = (
     "languages",
 )
 
+# Fields that describe what user does NOT want.
+_PROFILE_ANTI_FIELDS = (
+    "anti_roles",
+    "deal_breakers",
+    "industries_avoid",
+)
+
 # Russian + English stopwords frequent in profile text.
 _STOPWORDS = {
     "и", "в", "на", "с", "по", "для", "не", "или", "что", "как",
@@ -43,9 +50,9 @@ def _tokenize(text: str) -> set[str]:
     }
 
 
-def _collect_profile_text(profile_data: dict) -> str:
+def _collect_profile_text(profile_data: dict, fields: tuple) -> str:
     parts: list[str] = []
-    for field in _PROFILE_TEXT_FIELDS:
+    for field in fields:
         val = profile_data.get(field)
         if not val:
             continue
@@ -74,8 +81,9 @@ def rank_vacancies(
     """
     import random
 
-    profile_tokens = _tokenize(_collect_profile_text(profile_data))
-    if not profile_tokens:
+    positive_tokens = _tokenize(_collect_profile_text(profile_data, _PROFILE_TEXT_FIELDS))
+    negative_tokens = _tokenize(_collect_profile_text(profile_data, _PROFILE_ANTI_FIELDS))
+    if not positive_tokens:
         # Profile has no usable text — fall back to random order.
         random.shuffle(vacancies)
         return vacancies
@@ -83,7 +91,10 @@ def rank_vacancies(
     scored: list[tuple[int, Vacancy]] = []
     for v in vacancies:
         vac_tokens = _tokenize(_vacancy_text(v))
-        overlap = len(profile_tokens & vac_tokens)
+        positive = len(positive_tokens & vac_tokens)
+        negative = len(negative_tokens & vac_tokens)
+        # Штраф за anti-поля вдвое сильнее чем бонус за positive
+        overlap = positive - negative * 2
         scored.append((overlap, v))
 
     # Shuffle within equal-score groups so we don't always pick same vacancies
