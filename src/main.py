@@ -12,6 +12,7 @@ from src.bot.handlers.commands import router as commands_router
 from src.bot.handlers.cv_upload import router as cv_upload_router
 from src.bot.handlers.profile_edit import router as profile_edit_router
 from src.bot.handlers.reactions import router as reactions_router
+from src.bot.handlers.cover_letter import router as cover_letter_router
 from src.bot.handlers.voice import router as voice_router
 from src.bot.handlers.admin import router as admin_router
 from src.config import settings
@@ -54,6 +55,7 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(commands_router)
     dp.include_router(reactions_router)
+    dp.include_router(cover_letter_router)
     dp.include_router(cv_upload_router)
     dp.include_router(voice_router)
     dp.include_router(profile_edit_router)
