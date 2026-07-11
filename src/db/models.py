@@ -173,3 +173,28 @@ class TributeWebhookEvent(Base):
     payload: Mapped[dict] = mapped_column(JSONB)
     signature_valid: Mapped[bool] = mapped_column(Boolean)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+class CoverLetterUsage(Base):
+    """Логирует каждое сгенерированное сопроводительное письмо.
+
+    Используется для rolling-window rate limit (24ч) — считаем COUNT(*)
+    записей за последние 24 часа для user_id, сравниваем с лимитом тарифа.
+    """
+    __tablename__ = "cover_letter_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    vacancy_match_id: Mapped[int | None] = mapped_column(
+        ForeignKey("vacancy_matches.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
