@@ -12,6 +12,7 @@ TELEGRAM_CHANNELS: list[str] = [
     "alfadigital_jobs",
     "geekjobs",
     "g_jobchannel",
+    "naudalenkebro",
     # Из списка Ulyana
     "normrabota",
     "huggabletalents",
