@@ -7,7 +7,7 @@ from aiogram.types import Message
 from sqlalchemy import String, cast, distinct, func, select
 
 from src.config import settings
-from src.db.models import Profile, User, VacancyMatch
+from src.db.models import Profile, SeenVacancy, User, VacancyMatch
 from src.db.session import async_session
 
 router = Router()
