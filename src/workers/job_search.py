@@ -19,6 +19,7 @@ from src.config import settings
 from src.db.models import Profile, Source, SourceType, User, UserState, VacancyMatch
 from src.db.session import async_session
 from src.services.sources_service import filter_unseen, list_user_sources, mark_seen
+from src.services.profile_validation import is_profile_ready
 from src.sources.base import JobSource, Vacancy
 from src.sources.career_sites import CareerSiteSource
 from src.sources.telegram_channel import TelegramChannelSource
@@ -108,6 +109,10 @@ async def _process_user(bot: Bot, user: User) -> dict:
         profile = profile_result.scalar_one_or_none()
         if profile is None or not profile.profile_data:
             log.info("skip_no_profile")
+            return {"fetched": 0, "matched": 0, "delivered": 0}
+        ready, reason = is_profile_ready(profile.profile_data)
+        if not ready:
+            log.info("skip_incomplete_profile", reason=reason)
             return {"fetched": 0, "matched": 0, "delivered": 0}
 
         # 2. List active sources
@@ -243,6 +248,9 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
             if profile is None or not profile.profile_data:
                 log.info("skip_no_profile_buffer")
                 # Не выходим — может быть в буфере есть что доставить
+            elif not is_profile_ready(profile.profile_data)[0]:
+                log.info("skip_incomplete_profile_buffer")
+                # Не матчим новое, но доставим из буфера если что-то есть
             else:
                 # 2. Sources
                 sources = await list_user_sources(session, user.id)
