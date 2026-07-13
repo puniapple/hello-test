@@ -27,8 +27,8 @@ async def admin_stats(message: Message) -> None:
         return  # тихо игнорим не-админов
  
     now_msk = datetime.now(MSK)
-    today_msk = now_msk.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_utc = today_msk.astimezone(timezone.utc)
+    now_utc = datetime.now(timezone.utc)
+    today_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
  
     async with async_session() as session:
         # ─── Основные метрики (как было) ───
