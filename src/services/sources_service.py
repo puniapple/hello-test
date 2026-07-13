@@ -42,6 +42,7 @@ DEFAULT_TELEGRAM_CHANNELS: list[str] = [
     "product_jobs",
     "remocate",
     "remote_jobs_relocate",
+    "remotejobss",
     "rusukrjobs",
     "theblueprintcareer",
     "theyseeku",
