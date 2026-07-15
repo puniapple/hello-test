@@ -51,11 +51,13 @@ async def admin_stats(message: Message) -> None:
         # Сегодня — неполный день, отдельно
         delivered_today_total = await session.scalar(
             select(func.count(VacancyMatch.id))
-            .where(VacancyMatch.sent_at >= today_utc)
+            .where(VacancyMatch.delivered_at >= today_utc)
+            .where(VacancyMatch.delivered_at.isnot(None))
         )
         delivered_today_users = await session.scalar(
             select(func.count(distinct(VacancyMatch.user_id)))
-            .where(VacancyMatch.sent_at >= today_utc)
+            .where(VacancyMatch.delivered_at >= today_utc)
+            .where(VacancyMatch.delivered_at.isnot(None))
         )
  
         deliveries_by_day: list[tuple[str, int, int]] = []
@@ -65,13 +67,13 @@ async def admin_stats(message: Message) -> None:
  
             total_vacancies = await session.scalar(
                 select(func.count(VacancyMatch.id))
-                .where(VacancyMatch.sent_at >= day_start)
-                .where(VacancyMatch.sent_at < day_end)
+                .where(VacancyMatch.delivered_at >= day_start)
+                .where(VacancyMatch.delivered_at < day_end)
             )
             uniq_users = await session.scalar(
                 select(func.count(distinct(VacancyMatch.user_id)))
-                .where(VacancyMatch.sent_at >= day_start)
-                .where(VacancyMatch.sent_at < day_end)
+                .where(VacancyMatch.delivered_at >= day_start)
+                .where(VacancyMatch.delivered_at < day_end)
             )
             deliveries_by_day.append((
                 day_start.strftime("%d.%m"),
