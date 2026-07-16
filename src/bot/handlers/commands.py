@@ -56,6 +56,10 @@ async def get_or_create_user(telegram_id: int, telegram_username: str | None) ->
             session.add(profile)
             is_new = True
 
+        # Восстанавливаем активность если юзер вернулся после блокировки
+        if not is_new and not user.is_active:
+            user.is_active = True
+
         # Provision default sources (idempotent — safe to call for existing users)
         await provision_default_sources(session, user.id)
 

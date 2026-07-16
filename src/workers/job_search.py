@@ -23,6 +23,7 @@ from src.services.profile_validation import is_profile_ready
 from src.sources.base import JobSource, Vacancy
 from src.sources.career_sites import CareerSiteSource
 from src.sources.telegram_channel import TelegramChannelSource
+from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 logger = structlog.get_logger(__name__)
 
@@ -199,6 +200,11 @@ async def _process_user(bot: Bot, user: User) -> dict:
                 )
                 sent_count += 1
                 await asyncio.sleep(0.5)
+            except (TelegramForbiddenError, TelegramBadRequest) as e:
+                log.info("user_blocked_bot", user_id=user.id, error=str(e))
+                user.is_active = False
+                await session.commit()
+                return {"fetched": len(all_fetched), "matched": len(to_match), "delivered": sent_count}
             except Exception as e:
                 log.warning("delivery_failed", url=vacancy.url, error=str(e))
                 continue
@@ -399,6 +405,11 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
                 vm.delivered_at = now_utc
                 sent_count += 1
                 await asyncio.sleep(0.5)
+            except (TelegramForbiddenError, TelegramBadRequest) as e:
+                log.info("user_blocked_bot", user_id=user.id, error=str(e))
+                user.is_active = False
+                await session.commit()
+                return {"fetched": fetched_count, "matched": matched_count, "delivered": sent_count}
             except Exception as e:
                 log.warning("delivery_failed_buffer", url=vm.vacancy_data.get("url"), error=str(e))
                 continue
