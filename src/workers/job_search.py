@@ -330,54 +330,46 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
                         user.last_match_cycle_at = now_utc
 
 
-        # 8. Cleanup: удалить из буфера ваки старше 48 часов
-        expiry_cutoff = now_utc - timedelta(hours=48)
-        expired_result = await session.execute(
-            select(VacancyMatch)
-            .where(VacancyMatch.user_id == user.id)
-            .where(VacancyMatch.delivered_at.is_(None))
-            .where(VacancyMatch.sent_at < expiry_cutoff)
-        )
-        expired = expired_result.scalars().all()
-        for vm in expired:
-            await session.delete(vm)
-        if expired:
-            await session.commit()
-            log.info("buffer_expired_removed", count=len(expired))
-
         # ─── Часть 2: доставка из буфера (всегда) ───
         # Загружаем весь буфер юзера, отсортированный по скору
         buffer_result = await session.execute(
             select(VacancyMatch)
             .where(VacancyMatch.user_id == user.id)
             .where(VacancyMatch.delivered_at.is_(None))
-            .order_by(VacancyMatch.match_score.desc())
+            .order_by(VacancyMatch.sent_at.desc(), VacancyMatch.match_score.desc())
         )
         buffer = buffer_result.scalars().all()
         log.info("buffer_size", count=len(buffer))
 
+        # Считаем сколько уже доставили сегодня
+        delivered_today = await session.scalar(
+            select(func.count(VacancyMatch.id))
+            .where(VacancyMatch.user_id == user.id)
+            .where(VacancyMatch.delivered_at >= today_start)
+        ) or 0
+        # Временный дневной лимит до Tribute launch (когда добавим тарифы)
+        # Free по оферте — 3/день, Pro — 15/день (5 × 3 цикла).
+        # Пока Pro нет, ставим 10 всем — среднее между Free и Pro.
+        DAILY_LIMIT = 10
+        remaining_today = max(0, DAILY_LIMIT - delivered_today)
         # Сколько циклов осталось до конца дня (включая текущий)
         if is_matching_cycle:
-            # Только что отработали матчинг — это и есть первый цикл
             remaining_cycles = CYCLES_PER_DAY
         else:
-            # Грубая оценка: цикл = группа доставок в течение часа
-            # Считаем что между циклами >1 часа
             cycles_done = await _estimate_cycles_done(session, user.id, today_start, now_utc)
             remaining_cycles = max(1, CYCLES_PER_DAY - cycles_done)
-
-        # Сколько отправить сейчас
-        if len(buffer) == 0:
+        # Сколько отправить сейчас: равномерно по оставшимся циклам, но не больше остатка на день
+        if len(buffer) == 0 or remaining_today == 0:
             to_send_now = 0
         else:
-            # Равномерное распределение, минимум 1 если есть ваки
-            to_send_now = max(1, len(buffer) // remaining_cycles)
-            # Крышка — Pro 5, Free 3. На тесте у тебя Pro.
-            to_send_now = min(to_send_now, 5)
+            to_send_now = max(1, remaining_today // remaining_cycles)
+            to_send_now = min(to_send_now, len(buffer), remaining_today)
 
         log.info(
             "delivery_plan",
             buffer=len(buffer),
+            delivered_today=delivered_today,
+            remaining_today=remaining_today,
             remaining_cycles=remaining_cycles,
             to_send_now=to_send_now,
         )
