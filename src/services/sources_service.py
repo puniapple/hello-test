@@ -1,13 +1,63 @@
-"""Internal service for managing user sources and dedup."""
+"""Internal service for managing user sources and dedup.
+
+NOTE (unified pool model, июль 2026):
+- Все юзеры получают единый пул источников из реестра кода
+  (career_sites._registry + константа DEFAULT_TELEGRAM_CHANNELS ниже).
+- Таблица Source в БД остаётся, но новая логика цикла её не читает и не пишет.
+- Матчер + pre-filter отвечают за то, чтобы юзер получал только релевантное.
+"""
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import select, false, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.models import SeenVacancy, Source, SourceType
 from src.sources.base import Vacancy
-from sqlalchemy import false, or_
+from src.sources.career_sites import get_career_site_ids
+
+
+# Единый список Telegram-каналов, которые фетчатся всем юзерам.
+# Добавила новый канал — вписала сюда, при следующем цикле пойдёт всем.
+from src.sources.channels_config import TELEGRAM_CHANNELS as DEFAULT_TELEGRAM_CHANNELS
+
+
+def _build_sources_from_registry() -> list[Source]:
+    """Собираем in-memory Source-объекты из реестра кода.
+
+    Возвращает не-persistent (не привязанные к БД) ORM-объекты Source
+    с заполненными identifier / source_type / is_active. Их достаточно
+    для _fetch_from_all_sources — он читает только эти поля.
+    """
+    sources: list[Source] = []
+
+    for site_id in get_career_site_ids():
+        sources.append(
+            Source(
+                user_id=0,  # sentinel, не используется дальше по цепочке
+                source_type=SourceType.career_site,
+                identifier=site_id,
+                is_active=True,
+                filters=None,
+            )
+        )
+
+    for channel in DEFAULT_TELEGRAM_CHANNELS:
+        sources.append(
+            Source(
+                user_id=0,
+                source_type=SourceType.telegram_channel,
+                identifier=channel,
+                is_active=True,
+                filters=None,
+            )
+        )
+
+    return sources
+
+
+# Кешируем на всё время процесса — реестр в коде не меняется без рестарта.
+_CACHED_SOURCES: list[Source] | None = None
 
 
 async def add_source(
@@ -17,6 +67,10 @@ async def add_source(
     identifier: str,
     filters: dict | None = None,
 ) -> Source:
+    """Оставлено для обратной совместимости со старыми скриптами.
+
+    Записывает в БД, но новая логика цикла эти записи не читает.
+    """
     src = Source(
         user_id=user_id,
         source_type=source_type,
@@ -34,11 +88,19 @@ async def list_user_sources(
     user_id: int,
     source_type: SourceType | None = None,
 ) -> list[Source]:
-    stmt = select(Source).where(Source.user_id == user_id, Source.is_active.is_(True))
-    if source_type is not None:
-        stmt = stmt.where(Source.source_type == source_type)
-    result = await session.execute(stmt.order_by(Source.id))
-    return list(result.scalars())
+    """Возвращает единый пул источников из реестра.
+
+    Аргументы session и user_id сохранены в сигнатуре, но игнорируются —
+    все юзеры получают одинаковый набор. Фильтр по source_type работает,
+    если явно передан.
+    """
+    global _CACHED_SOURCES
+    if _CACHED_SOURCES is None:
+        _CACHED_SOURCES = _build_sources_from_registry()
+
+    if source_type is None:
+        return list(_CACHED_SOURCES)
+    return [s for s in _CACHED_SOURCES if s.source_type == source_type]
 
 
 async def deactivate_sources(
@@ -46,11 +108,11 @@ async def deactivate_sources(
     user_id: int,
     source_type: SourceType,
 ) -> int:
-    """Soft-delete: mark all sources of given type inactive. Returns count."""
-    sources = await list_user_sources(session, user_id, source_type)
-    for s in sources:
-        s.is_active = False
-    return len(sources)
+    """No-op. Источники не привязаны к юзеру, отключать нечего.
+
+    Оставлено, чтобы не падал существующий код, который мог это вызывать.
+    """
+    return 0
 
 
 async def filter_unseen(
@@ -97,7 +159,6 @@ async def filter_unseen(
         if row[2]:
             seen_global.add(row[2])
 
-    # Также дедуплицируем внутри текущей пачки (если два канала прислали репост сейчас)
     fresh: list[Vacancy] = []
     batch_fingerprints: set[str] = set()
     batch_global: set[str] = set()

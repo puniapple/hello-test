@@ -5,15 +5,21 @@ gives narrow-niche users nearly zero relevant vacancies. We instead
 score each vacancy by lexical overlap with the user's profile keywords
 and pick the top N — niche users see their relevant vacancies, broad
 users see most-promising candidates first.
+
+Also subtracts overlap with anti_roles/deal_breakers/industries_avoid,
+so vacancies containing "product manager" for someone with anti-role
+"продакт-менеджер" get pushed to the bottom, saving Haiku calls.
 """
 
 from __future__ import annotations
 
+import random
 import re
+
 from src.sources.base import Vacancy
 
-# Profile fields that contain user's interests/roles/skills as text.
-# Each can be str or list[str] in the JSONB profile_data.
+
+# Profile fields that contain user's interests/roles/skills as text (positive signals).
 _PROFILE_TEXT_FIELDS = (
     "target_roles",
     "expertise",
@@ -22,6 +28,14 @@ _PROFILE_TEXT_FIELDS = (
     "ideal_work_description",
     "must_haves",
     "languages",
+    "current_role_summary",
+)
+
+# Profile fields that contain what the user does NOT want (negative signals).
+_PROFILE_ANTI_FIELDS = (
+    "anti_roles",
+    "deal_breakers",
+    "industries_avoid",
 )
 
 # Russian + English stopwords frequent in profile text.
@@ -34,6 +48,15 @@ _STOPWORDS = {
 
 _WORD_RE = re.compile(r"[a-zA-Zа-яА-ЯёЁ][a-zA-Zа-яА-ЯёЁ0-9+#.\-]{2,}")
 
+# Штраф за anti-совпадение сильнее, чем награда за позитивное,
+# чтобы явно нежелательные вакансии точно ушли в самый низ.
+ANTI_WEIGHT = 3
+
+# Порог отсечения. Вакансии с итоговым скором ниже — не идут в матчер.
+# 1 означает: должно быть хотя бы одно pozitive-совпадение
+# сверх любых anti-штрафов.
+DEFAULT_MIN_SCORE = 1
+
 
 def _tokenize(text: str) -> set[str]:
     return {
@@ -43,9 +66,9 @@ def _tokenize(text: str) -> set[str]:
     }
 
 
-def _collect_profile_text(profile_data: dict) -> str:
+def _collect_field_text(profile_data: dict, fields: tuple[str, ...]) -> str:
     parts: list[str] = []
-    for field in _PROFILE_TEXT_FIELDS:
+    for field in fields:
         val = profile_data.get(field)
         if not val:
             continue
@@ -66,27 +89,35 @@ def _vacancy_text(v: Vacancy) -> str:
 def rank_vacancies(
     vacancies: list[Vacancy],
     profile_data: dict,
+    min_score: int = DEFAULT_MIN_SCORE,
 ) -> list[Vacancy]:
-    """Return vacancies ordered by lexical overlap with profile, descending.
+    """Return vacancies ordered by relevance to profile, descending.
 
-    Vacancies with zero overlap stay in the list (at the end, randomized
-    among themselves) — Haiku may still find non-obvious matches there.
+    Score = positive overlap - anti overlap * ANTI_WEIGHT.
+    Vacancies with score < min_score are dropped entirely (saves Haiku cost).
+
+    If profile has no usable text at all, falls back to random order without dropping.
     """
-    import random
+    positive_tokens = _tokenize(_collect_field_text(profile_data, _PROFILE_TEXT_FIELDS))
+    anti_tokens = _tokenize(_collect_field_text(profile_data, _PROFILE_ANTI_FIELDS))
 
-    profile_tokens = _tokenize(_collect_profile_text(profile_data))
-    if not profile_tokens:
-        # Profile has no usable text — fall back to random order.
+    if not positive_tokens and not anti_tokens:
+        # Профиль пустой по тексту — не отсекаем, просто перемешиваем.
         random.shuffle(vacancies)
         return vacancies
 
     scored: list[tuple[int, Vacancy]] = []
     for v in vacancies:
         vac_tokens = _tokenize(_vacancy_text(v))
-        overlap = len(profile_tokens & vac_tokens)
-        scored.append((overlap, v))
+        positive_overlap = len(positive_tokens & vac_tokens)
+        anti_overlap = len(anti_tokens & vac_tokens)
+        score = positive_overlap - anti_overlap * ANTI_WEIGHT
+        scored.append((score, v))
 
-    # Shuffle within equal-score groups so we don't always pick same vacancies
+    # Отсекаем всё, что ниже порога.
+    scored = [(s, v) for s, v in scored if s >= min_score]
+
+    # Перемешиваем внутри равных бакетов, чтобы не отдавать всегда одно и то же.
     random.shuffle(scored)
     scored.sort(key=lambda x: x[0], reverse=True)
     return [v for _, v in scored]

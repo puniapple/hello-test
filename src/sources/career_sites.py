@@ -88,6 +88,9 @@ def _registry() -> dict[str, tuple]:
         # ─── HireHi через HTML ───
         "hirehi": ("HireHi", "hirehi", ""),
 
+        # ─── Dream Job ───
+        "dreamjob": ("Dream Job", "dreamjob", ""),
+
         # ─── Teamtailor HTML ───
         "sumsub": ("Sumsub", "teamtailor", "https://careers.sumsub.com/jobs", "sumsub"),
 
@@ -140,6 +143,9 @@ class CareerSiteSource(JobSource):
         
         if kind == "hirehi":
             return await _fetch_hirehi()
+
+        if kind == "dreamjob":
+            return await _fetch_dreamjob()
 
         if kind == "remotive":
             return await _fetch_remotive()
@@ -1906,4 +1912,108 @@ async def _fetch_hirehi() -> list[Vacancy]:
                     raw={"site": "hirehi", "vacancy_id": vacancy_id, "category": category},
                 )
             )
+    return vacancies
+
+async def _fetch_dreamjob() -> list[Vacancy]:
+    """Парсер Dream Job (dreamjob.ru).
+
+    Массовый российский агрегатор — 982k+ вакансий на 2026-07.
+    Основная ценность: HoReCa, медицина, склад, рабочие профессии,
+    инженеры, производство — то, чего нет в Habr Career / HireHi.
+
+    Особенности:
+    - SSR-рендер, HTML содержит все карточки сразу
+    - ~10 вакансий на страницу
+    - Пагинация ?page=N, id не пересекаются
+    - HTML ~8MB на страницу (много служебного JS)
+    - Превью описания достаточно матчеру, детальную не тянем
+
+    5 страниц параллельно через asyncio.gather ≈ 50 вакансий за цикл.
+    """
+    base_url = "https://dreamjob.ru/vakansii"
+    pages_to_fetch = 5
+
+    async def fetch_one(client: httpx.AsyncClient, page: int) -> tuple[int, str]:
+        url = base_url if page == 1 else f"{base_url}?page={page}"
+        try:
+            response = await client.get(url, headers={"User-Agent": USER_AGENT})
+            if response.status_code != 200:
+                return page, ""
+            return page, response.text
+        except httpx.HTTPError:
+            return page, ""
+
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        pages = await asyncio.gather(
+            *(fetch_one(client, p) for p in range(1, pages_to_fetch + 1))
+        )
+
+    vacancies: list[Vacancy] = []
+    seen_ids: set[str] = set()
+
+    for page_num, html in pages:
+        if not html:
+            continue
+        soup = BeautifulSoup(html, "html.parser")
+
+        for card in soup.select("div.vacancy-new__item"):
+            link = card.select_one("a.vacancy-new__main-link")
+            if not link:
+                continue
+
+            href = link.get("href", "")
+            m = re.search(r"/employers/(\d+)/vakansii/(\d+)", href)
+            if not m:
+                continue
+            employer_id, vacancy_id = m.group(1), m.group(2)
+
+            if vacancy_id in seen_ids:
+                continue
+            seen_ids.add(vacancy_id)
+
+            title_tag = card.select_one("h4.vacancy-new__heading")
+            title = title_tag.get_text(strip=True) if title_tag else ""
+            if not title:
+                continue
+
+            salary_tag = card.select_one("div.vacancy-new__salary")
+            salary_text = salary_tag.get_text(" ", strip=True) if salary_tag else ""
+            salary = salary_text.strip() or None
+
+            # Первый непустой тег, кроме "Новая", это опыт работы
+            experience = None
+            for tag in card.select("div.tags__item"):
+                t = tag.get_text(strip=True)
+                if t and t.lower() != "новая":
+                    experience = t
+                    break
+
+            desc_tag = card.select_one("p.vacancy-new__text-preview")
+            description = desc_tag.get_text(" ", strip=True) if desc_tag else ""
+            if experience:
+                description = f"Требуемый опыт: {experience}\n\n{description}"
+
+            company_tag = card.select_one("span.vacancy-new__employer-name")
+            company = company_tag.get_text(strip=True) if company_tag else ""
+
+            city_tag = card.select_one("div.vacancy-new__city")
+            location = city_tag.get_text(strip=True) if city_tag else None
+
+            vacancies.append(Vacancy(
+                external_id=f"dreamjob:{vacancy_id}",
+                source_type=SourceType.career_site,
+                title=title,
+                company=company,
+                url=f"https://dreamjob.ru{href}",
+                description=description,
+                salary=salary,
+                location=location,
+                published_at=None,
+                raw={
+                    "employer_id": employer_id,
+                    "vacancy_id": vacancy_id,
+                    "experience": experience,
+                },
+            ))
+
     return vacancies

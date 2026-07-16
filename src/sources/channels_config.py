@@ -3,6 +3,16 @@
 # Telegram public channel usernames (без @, без https://t.me/)
 # Список добавляется/убирается здесь, релиз не нужен.
 TELEGRAM_CHANNELS: list[str] = [
+    # Добавлено 12.07.2026 — русскоязычные biz/marketing/product
+    "workasap",
+    "forallmarketing",
+    "forproducts",
+    "vacanciesrus",
+    "dnative_job100",
+    "alfadigital_jobs",
+    "geekjobs",
+    "g_jobchannel",
+    "naudalenkebro",
     # Из списка Ulyana
     "normrabota",
     "huggabletalents",

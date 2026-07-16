@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from src.db.models import Source, SourceType
 from src.sources.base import JobSource, Vacancy
 
-TG_PREVIEW_BASE = "https://t.me/s"
+TG_PREVIEW_BASE = "https://telegram.me/s"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"

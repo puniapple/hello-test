@@ -1,5 +1,4 @@
 """Formatting and inline keyboard for vacancy delivery messages."""
-
 from __future__ import annotations
 
 import re
@@ -31,7 +30,6 @@ def _score_emoji(score: float) -> str:
 def format_vacancy_message(vacancy: Vacancy, match: MatchResult) -> str:
     """Build a clean MarkdownV2 message for one matched vacancy."""
     parts = []
-
     emoji = _score_emoji(match.score)
     score_str = f"{match.score:.1f}".replace(".", "\\.")
     parts.append(f"{emoji} *{score_str}/10*  {_escape_md(vacancy.title)}")
@@ -44,6 +42,7 @@ def format_vacancy_message(vacancy: Vacancy, match: MatchResult) -> str:
         meta_lines.append(f"📍 {_escape_md(vacancy.location)}")
     if vacancy.salary:
         meta_lines.append(f"💰 {_escape_md(vacancy.salary)}")
+
     if meta_lines:
         parts.extend(meta_lines)
         parts.append("")
@@ -59,7 +58,6 @@ def format_vacancy_message(vacancy: Vacancy, match: MatchResult) -> str:
         parts.append("")
 
     parts.append(f"[Открыть вакансию]({_escape_url(vacancy.url)})")
-
     return "\n".join(parts)
 
 
@@ -69,7 +67,7 @@ def _escape_url(url: str) -> str:
 
 
 def build_reaction_keyboard(match_id: int) -> InlineKeyboardMarkup:
-    """Inline buttons for 👍/👎/откликнулась feedback."""
+    """Inline buttons for reactions + cover letter generation."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -78,6 +76,12 @@ def build_reaction_keyboard(match_id: int) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(text="📨 откликнулась", callback_data=f"react:applied:{match_id}"),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✍️ Написать сопроводительное",
+                    callback_data=f"cover:generate:{match_id}",
+                ),
             ],
         ]
     )
