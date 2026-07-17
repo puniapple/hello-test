@@ -55,6 +55,16 @@ async def cmd_upgrade(message: Message) -> None:
         )
         user = result.scalar_one_or_none()
 
+    # 9.1 — Grandfather не платит, у него Pro навсегда
+    if user and user.plan == "grandfather":
+        await message.answer(
+            "Тебе не нужно платить — у тебя Pro 💎 бесплатно навсегда "
+            "как у пользователя раннего тестирования.\n\n"
+            "Если что-то не работает или хочется новую фичу — "
+            "напиши мне напрямую @puniapple"
+        )
+        return
+    
     # Если уже Pro — показываем статус, не предлагаем покупать снова
     if user and user.plan == "pro" and user.subscription_status == "pro_active":
         expires = user.plan_expires_at.strftime("%d.%m.%Y") if user.plan_expires_at else "—"
