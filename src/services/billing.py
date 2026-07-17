@@ -169,11 +169,14 @@ async def handle_cancelled_subscription(
 # --- Cron / scheduled jobs ---
 
 
-async def downgrade_expired_subscriptions(session: AsyncSession) -> int:
+async def downgrade_expired_subscriptions(session: AsyncSession, bot=None) -> dict:
     """Раз в час: помечает expired у юзеров с истёкшим plan_expires_at.
-
-    Основной механизм downgrade для отменённых подписок (после cancel).
-    Также страхует активные подписки от потерянных webhook'ов.
+    
+    Различает два сценария:
+    - 5.11: subscription_status='pro_cancelled_until_expiry' → юзер сам отменил, срок вышел
+    - 5.8: subscription_status='pro_active' → renewal не прошёл (Tribute не смог списать)
+    
+    Возвращает dict со счётчиками по типам событий.
     """
     now = datetime.now(timezone.utc)
     result = await session.execute(
@@ -185,13 +188,138 @@ async def downgrade_expired_subscriptions(session: AsyncSession) -> int:
             ),
         )
     )
-    count = 0
+    
+    cancelled_expired = 0  # 5.11
+    renewal_failed = 0  # 5.8
+    users_to_notify = []
+    
     for user in result.scalars():
+        was_cancelled = user.subscription_status == "pro_cancelled_until_expiry"
         user.plan = "free"
         user.subscription_status = "pro_expired"
         user.auto_renew = False
-        count += 1
-    if count:
+        
+        if was_cancelled:
+            cancelled_expired += 1
+            users_to_notify.append((user.telegram_id, "cancelled_expired"))
+        else:
+            renewal_failed += 1
+            users_to_notify.append((user.telegram_id, "renewal_failed"))
+    
+    if cancelled_expired or renewal_failed:
         await session.commit()
-        log.info("subscriptions_expired_downgraded", count=count)
-    return count
+        log.info(
+            "subscriptions_expired_downgraded",
+            cancelled_expired=cancelled_expired,
+            renewal_failed=renewal_failed,
+        )
+    
+    # Уведомляем юзеров
+    if bot:
+        for telegram_id, reason in users_to_notify:
+            try:
+                if reason == "cancelled_expired":
+                    text = (
+                        "Pro закончился, теперь ты на Free.\n\n"
+                        "— 1 подборка в день\n"
+                        "— До 3 вакансий за раз\n"
+                        "— 1 сопроводительное в день\n\n"
+                        "Вернуть Pro: /upgrade"
+                    )
+                else:  # renewal_failed
+                    text = (
+                        "Не получилось продлить Pro.\n\n"
+                        "Ты вернулся на Free: 1 подборка в день, до 3 вакансий, "
+                        "1 сопроводительное в день.\n\n"
+                        "Когда будешь готов — оплати заново через /upgrade. "
+                        "Профиль и история сохранены."
+                    )
+                await bot.send_message(telegram_id, text)
+            except Exception:
+                log.exception("expire_notify_failed", telegram_id=telegram_id)
+    
+    return {
+        "cancelled_expired": cancelled_expired,
+        "renewal_failed": renewal_failed,
+    }
+
+
+async def send_renewal_reminders(session: AsyncSession, bot=None) -> dict:
+    """Раз в день: напоминания перед списанием.
+    
+    - 5.4: за 7 дней до списания (только monthly-подписки)
+    - 5.5: за 1 день до списания (все активные подписки)
+    """
+    now = datetime.now(timezone.utc)
+    if not bot:
+        return {"reminded_7d": 0, "reminded_1d": 0}
+    
+    # 5.4 — за 7 дней (only monthly, weekly не шлём: у них период всего 7 дней)
+    seven_days_start = now + timedelta(days=7)
+    seven_days_end = now + timedelta(days=8)
+    result_7d = await session.execute(
+        select(User).where(
+            User.subscription_status == "pro_active",
+            User.plan_expires_at.between(seven_days_start, seven_days_end),
+            User.auto_renew.is_(True),
+        )
+    )
+    reminded_7d = 0
+    for user in result_7d.scalars():
+        # Определяем monthly по разнице (expires - last_payment)
+        # Если > 20 дней — это monthly. Если < 20 — weekly, пропускаем
+        if user.last_payment_at:
+            period_days = (user.plan_expires_at - user.last_payment_at).days
+            if period_days < 20:
+                continue  # weekly
+        
+        try:
+            text = (
+                f"Через 7 дней — {user.plan_expires_at.strftime('%d.%m.%Y')} — "
+                f"спишется 990₽ за следующий месяц Pro.\n\n"
+                f"Если хочешь отменить заранее — /cancel_subscription. "
+                f"Никаких автосписаний без твоего ведома.\n\n"
+                f"Всё ок — ничего делать не надо."
+            )
+            await bot.send_message(user.telegram_id, text)
+            reminded_7d += 1
+        except Exception:
+            log.exception("reminder_7d_failed", telegram_id=user.telegram_id)
+    
+    # 5.5 — за 1 день (weekly + monthly)
+    one_day_start = now + timedelta(days=1)
+    one_day_end = now + timedelta(days=2)
+    result_1d = await session.execute(
+        select(User).where(
+            User.subscription_status == "pro_active",
+            User.plan_expires_at.between(one_day_start, one_day_end),
+            User.auto_renew.is_(True),
+        )
+    )
+    reminded_1d = 0
+    for user in result_1d.scalars():
+        # Определяем weekly/monthly для правильной суммы
+        is_weekly = True
+        if user.last_payment_at:
+            period_days = (user.plan_expires_at - user.last_payment_at).days
+            is_weekly = period_days < 20
+        
+        amount = "349₽" if is_weekly else "990₽"
+        period_word = "неделю" if is_weekly else "месяц"
+        
+        try:
+            text = (
+                f"Завтра — {user.plan_expires_at.strftime('%d.%m.%Y')} — "
+                f"спишется {amount} за следующую {period_word} Pro.\n\n"
+                f"Всё ок — ничего делать не надо.\n\n"
+                f"Если хочешь отменить — /cancel_subscription до завтрашнего утра."
+            )
+            await bot.send_message(user.telegram_id, text)
+            reminded_1d += 1
+        except Exception:
+            log.exception("reminder_1d_failed", telegram_id=user.telegram_id)
+    
+    if reminded_7d or reminded_1d:
+        log.info("renewal_reminders_sent", reminded_7d=reminded_7d, reminded_1d=reminded_1d)
+    
+    return {"reminded_7d": reminded_7d, "reminded_1d": reminded_1d}

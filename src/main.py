@@ -21,7 +21,7 @@ from src.bot.handlers.cover_letter import router as cover_letter_router
 from src.bot.handlers.voice import router as voice_router
 from src.config import settings
 from src.db.session import async_session
-from src.services.billing import downgrade_expired_subscriptions
+from src.services.billing import downgrade_expired_subscriptions, send_renewal_reminders
 from src.web.server import create_web_app
 from src.workers.job_search import run_job_search_cycle
 
@@ -103,14 +103,27 @@ async def main() -> None:
 
     async def expire_subscriptions_job():
         async with async_session() as session:
-            count = await downgrade_expired_subscriptions(session)
-            if count:
-                log.info("subscriptions_expired", count=count)
-
+            result = await downgrade_expired_subscriptions(session, bot=bot)
+            if result and any(result.values()):
+                log.info("subscriptions_expired", **result)
+    
+    async def renewal_reminders_job():
+        async with async_session() as session:
+            result = await send_renewal_reminders(session, bot=bot)
+            if result and any(result.values()):
+                log.info("renewal_reminders", **result)
+    
     scheduler.add_job(
         expire_subscriptions_job,
         trigger=IntervalTrigger(hours=1),
         id="expire_subscriptions",
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        renewal_reminders_job,
+        trigger=CronTrigger(hour=9),  # раз в день в 9 UTC = 12 MSK
+        id="renewal_reminders",
         max_instances=1,
         coalesce=True,
     )
@@ -119,7 +132,7 @@ async def main() -> None:
     
     log.info(
             "scheduler_started",
-            jobs=["job_search_cycle (6/12/18 UTC)", "expire_subscriptions (hourly)"],
+            jobs=["job_search_cycle (6/12/18 UTC)", "expire_subscriptions (hourly)", "renewal_reminders (daily 9 UTC)"],
         )
 
     log.info("polling_started")
