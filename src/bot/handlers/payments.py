@@ -147,30 +147,74 @@ async def cmd_cancel_subscription(message: Message) -> None:
 # --- /subscription_status ---
 
 
-@router.message(Command("subscription_status"))
-async def cmd_subscription_status(message: Message) -> None:
+@router.message(Command("my_plan"))
+async def cmd_my_plan(message: Message) -> None:
     user_id = message.from_user.id
-
     async with async_session() as session:
         result = await session.execute(
             select(User).where(User.telegram_id == user_id)
         )
         user = result.scalar_one_or_none()
-
     if not user:
         await message.answer("Я тебя ещё не знаю. /start чтобы начать.")
         return
 
-    if user.plan != "pro":
-        await message.answer("Сейчас у тебя бесплатный план. /upgrade чтобы получить Pro.")
+    # 5.3 — Grandfather
+    if user.plan == "grandfather":
+        await message.answer(
+            "Твой тариф: <b>Pro 💎 ∞</b>\n\n"
+            "Бесплатный пожизненный доступ — как у пользователя раннего тестирования.\n\n"
+            "— Несколько подборок в день\n"
+            "— До 5 вакансий за раз\n"
+            "— До 5 сопроводительных в день\n\n"
+            "Спасибо, что был со мной с самого начала.",
+            parse_mode="HTML",
+        )
         return
 
-    expires = user.plan_expires_at.strftime("%d.%m.%Y") if user.plan_expires_at else "—"
-    status_human = {
-        "pro_active": "активна, автопродление включено",
-        "pro_cancelled_until_expiry": "отменена, доступ до конца оплаченного периода",
-        "pro_expired": "истекла",
-    }.get(user.subscription_status, user.subscription_status)
+    # 5.1 — Free
+    if user.plan != "pro":
+        await message.answer(
+            "Твой тариф: <b>Free</b>.\n\n"
+            "— 1 подборка в день\n"
+            "— До 3 вакансий за раз\n"
+            "— 1 сопроводительное в день\n\n"
+            "Хочешь больше? /upgrade",
+            parse_mode="HTML",
+        )
+        return
 
-    msg = f"💎 Pro\nДействует до: {expires}\nСтатус: {status_human}"
-    await message.answer(msg)
+    # 5.2 — Pro: определяем период (weekly / monthly) по plan_expires_at
+    # Если expires через ~7 дней от текущего продления — weekly, если ~30 — monthly
+    # Для простоты смотрим по subscription_id и амаунту в webhook payload... но у нас его нет тут.
+    # Более надёжный способ — по разнице (expires_at - last_payment_at). Но у нас может не быть last_payment_at.
+    # Упрощение: смотрим amount в tribute payload при первом платеже, но здесь этого поля нет.
+    # Пока используем эвристику — не показываем период, просто "Pro".
+    expires = user.plan_expires_at.strftime("%d.%m.%Y") if user.plan_expires_at else "—"
+
+    if user.subscription_status == "pro_active":
+        msg = (
+            f"Твой тариф: <b>Pro 💎</b>\n\n"
+            f"— Несколько подборок в день\n"
+            f"— До 5 вакансий за раз\n"
+            f"— До 5 сопроводительных в день\n"
+            f"— Следующее списание: {expires}\n\n"
+            f"Отменить подписку: /cancel_subscription"
+        )
+    elif user.subscription_status == "pro_cancelled_until_expiry":
+        msg = (
+            f"Твой тариф: <b>Pro 💎</b> (отменена)\n\n"
+            f"Действует до: {expires}\n"
+            f"Дальше — переход на Free.\n\n"
+            f"Передумал? /upgrade"
+        )
+    elif user.subscription_status == "pro_expired":
+        msg = (
+            f"Твой Pro истёк {expires}.\n\n"
+            f"Сейчас ты на Free.\n\n"
+            f"Вернуть Pro: /upgrade"
+        )
+    else:
+        msg = f"💎 Pro\nДействует до: {expires}\nСтатус: {user.subscription_status}"
+
+    await message.answer(msg, parse_mode="HTML")
