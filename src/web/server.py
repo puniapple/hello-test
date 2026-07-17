@@ -36,30 +36,46 @@ EVENT_HANDLERS = {
 }
 
 
-# Сообщения юзерам по событиям
-USER_MESSAGES = {
+# Сообщения юзерам по событиям Tribute
+# Различаем weekly / monthly по payload["period"]
+USER_MESSAGES_WEEKLY = {
     "new_subscription": (
-        "✨ Оплата получена. Pro активирован до {expires:%d.%m.%Y}.\n\n"
-        "Теперь я буду искать вакансии для тебя чаще — несколько раз в день, "
-        "до 8 вакансий за подборку. Подписка продлевается автоматически, "
-        "отменить можно в любой момент через /cancel_subscription."
+        "Подписка оформлена, Pro 💎 активен на неделю.\n\n"
+        "Теперь я буду присылать тебе несколько подборок в день, до 5 вакансий за раз, "
+        "и писать до 5 сопроводительных в день.\n\n"
+        "Следующее списание — {expires:%d.%m.%Y} (349₽), предупрежу заранее.\n\n"
+        "Управлять подпиской: /my_plan\n"
+        "Отменить: /cancel_subscription"
     ),
     "renewed_subscription": (
-        "💎 Подписка продлена ещё на месяц. Pro до {expires:%d.%m.%Y}.\n"
-        "Спасибо что остаёшься со мной."
+        "Подписка продлена на неделю, Pro 💎 активен до {expires:%d.%m.%Y}.\n\n"
+        "Следующее списание — {expires:%d.%m.%Y} (349₽)."
     ),
+}
+
+USER_MESSAGES_MONTHLY = {
+    "new_subscription": (
+        "Подписка оформлена, Pro 💎 активен на месяц.\n\n"
+        "Теперь я буду присылать тебе несколько подборок в день, до 5 вакансий за раз, "
+        "и писать до 5 сопроводительных в день.\n\n"
+        "Следующее списание — {expires:%d.%m.%Y} (990₽), предупрежу заранее.\n\n"
+        "Управлять подпиской: /my_plan\n"
+        "Отменить: /cancel_subscription"
+    ),
+    "renewed_subscription": (
+        "Подписка продлена на месяц, Pro 💎 активен до {expires:%d.%m.%Y}.\n\n"
+        "Следующее списание — {expires:%d.%m.%Y} (990₽)."
+    ),
+}
+
+# Общие сообщения независимые от периода
+USER_MESSAGES_COMMON = {
     "cancelled_subscription": (
-        "Подписка отменена. Доступ к Pro останется до {expires:%d.%m.%Y}.\n"
-        "Возвращайся когда захочешь — /upgrade всё ещё ждёт."
+        "Подписка отменена. Pro будет работать до {expires:%d.%m.%Y}, дальше — Free.\n\n"
+        "Если передумаешь — /upgrade всегда на месте."
     ),
 }
 
-
-EVENT_TO_MESSAGE_KEY = {
-    "new_subscription": "new_subscription",
-    "renewed_subscription": "renewed_subscription",
-    "cancelled_subscription": "cancelled_subscription",
-}
 
 
 async def _record_event(
@@ -185,11 +201,17 @@ async def _notify_user(
 ) -> None:
     """Послать юзеру сообщение по итогам обработки события."""
     try:
-        message_key = EVENT_TO_MESSAGE_KEY.get(event_name)
-        if not message_key:
-            return
+        # Общие события (независимо от периода)
+        template = USER_MESSAGES_COMMON.get(event_name)
 
-        template = USER_MESSAGES.get(message_key)
+        # События, зависящие от периода
+        if not template:
+            period = payload.get("period", "monthly")
+            if period == "weekly":
+                template = USER_MESSAGES_WEEKLY.get(event_name)
+            else:
+                template = USER_MESSAGES_MONTHLY.get(event_name)
+
         if not template:
             return
 
@@ -202,7 +224,8 @@ async def _notify_user(
             except ValueError:
                 expires = None
         if not expires:
-            expires = datetime.now(timezone.utc) + timedelta(days=30)
+            days = 7 if payload.get("period") == "weekly" else 30
+            expires = datetime.now(timezone.utc) + timedelta(days=days)
 
         text = template.format(expires=expires)
         await bot.send_message(telegram_id, text)
