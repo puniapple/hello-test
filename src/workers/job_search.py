@@ -242,6 +242,50 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
             last_match_cycle_at=str(user.last_match_cycle_at) if user.last_match_cycle_at else None,
         )
 
+        # ─── Обновляем счётчик пустых дней (раз в день, перед матчингом) ───
+        if is_matching_cycle:
+            yesterday_start = today_start - timedelta(days=1)
+            delivered_yesterday = await session.scalar(
+                select(func.count(VacancyMatch.id))
+                .where(VacancyMatch.user_id == user.id)
+                .where(VacancyMatch.delivered_at >= yesterday_start)
+                .where(VacancyMatch.delivered_at < today_start)
+            ) or 0
+            if delivered_yesterday == 0:
+                user.empty_streak_days = (user.empty_streak_days or 0) + 1
+            else:
+                if user.empty_streak_days:
+                    user.empty_streak_days = 0
+                if user.empty_notice_sent_at:
+                    user.empty_notice_sent_at = None
+            log.info(
+                "empty_streak_updated",
+                user_id=user.id,
+                streak=user.empty_streak_days,
+                delivered_yesterday=delivered_yesterday,
+            )
+            # Триггер напоминания на 3+ пустых дня, но не чаще одного раза
+            if user.empty_streak_days >= 3 and user.empty_notice_sent_at is None:
+                try:
+                    await bot.send_message(
+                        chat_id=user.telegram_id,
+                        text=(
+                            "Кажется, я уже прислал тебе все подходящие вакансии. "
+                            "Я продолжаю искать каждый день, но новых не появляется.\n\n"
+                            "Так бывает: либо на рынке тихо, либо у тебя слишком нишевый запрос.\n\n"
+                            "Предлагаю дополнить профиль новыми вводными или расширить запрос. "
+                            "Загляни в /edit_profile — я помогу."
+                        ),
+                    )
+                    user.empty_notice_sent_at = now_utc
+                    log.info("empty_streak_notice_sent", user_id=user.id, streak=user.empty_streak_days)
+                except (TelegramForbiddenError, TelegramBadRequest) as e:
+                    log.info("user_blocked_bot", user_id=user.id, error=str(e))
+                    user.is_active = False
+                except Exception as e:
+                    log.warning("empty_streak_notice_failed", user_id=user.id, error=str(e))
+            await session.commit()
+
         # ─── Часть 1: матчинг (только в первом цикле дня) ───
         matched_count = 0
         fetched_count = 0
@@ -347,10 +391,15 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
             .where(VacancyMatch.user_id == user.id)
             .where(VacancyMatch.delivered_at >= today_start)
         ) or 0
-        # Временный дневной лимит до Tribute launch (когда добавим тарифы)
-        # Free по оферте — 3/день, Pro — 15/день (5 × 3 цикла).
-        # Пока Pro нет, ставим 10 всем — среднее между Free и Pro.
-        DAILY_LIMIT = 10
+        # Дневной лимит доставки зависит от тарифа юзера.
+        # По оферте: Free — 3/день, Pro — 15/день. Grandfather — как Pro.
+        # Считаем истёкшую Pro-подписку как Free.
+        if user.plan == "pro" and user.plan_expires_at and user.plan_expires_at > now_utc:
+            DAILY_LIMIT = 15
+        elif user.plan == "grandfather":
+            DAILY_LIMIT = 15
+        else:
+            DAILY_LIMIT = 3
         remaining_today = max(0, DAILY_LIMIT - delivered_today)
         # Сколько циклов осталось до конца дня (включая текущий)
         if is_matching_cycle:
