@@ -153,20 +153,20 @@ async def tribute_webhook(request: web.Request) -> web.Response:
             session, event_name, event_key, sent_at, payload, is_valid
         )
         if not is_new:
-            log.info("tribute_event_duplicate", event=event_name, subscription_id=subscription_id)
+            log.info("tribute_event_duplicate", event_type=event_name, subscription_id=subscription_id)
             return web.Response(status=200, text="duplicate")
 
-        log.info("tribute_event_received", event=event_name, subscription_id=subscription_id)
+        log.info("tribute_event_received", event_type=event_name, subscription_id=subscription_id)
 
         handler = EVENT_HANDLERS.get(event_name)
         if not handler:
-            log.warning("tribute_event_unknown", event=event_name, payload=payload)
+            log.warning("tribute_event_unknown", event_type=event_name, payload=payload)
             return web.Response(status=200, text="unknown event ignored")
 
         try:
             telegram_id = await handler(session, payload)
         except Exception:
-            log.exception("tribute_handler_error", event=event_name)
+            log.exception("tribute_handler_error", event_type=event_name)
             # 200 чтобы Tribute не ретраил 24 часа — ошибка уже в логах
             return web.Response(status=200, text="handler error, swallowed")
 
