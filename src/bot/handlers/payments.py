@@ -30,16 +30,18 @@ router = Router()
 
 
 UPGRADE_TEXT = (
-    "💎 <b>Pro подписка</b> — что получаешь:\n\n"
-    "• Несколько подборок вакансий в день\n"
-    "• До 8 вакансий за подборку\n"
-    "• Приоритет в очереди матчинга\n\n"
-    "990₽/мес. Оплата картой любого банка. "
-    "Продлевается автоматически, отменить можно в любой момент — "
-    "напишу как это сделать когда понадобится.\n\n"
-    "После оплаты попадёшь в мой канал @{channel} — так работает Tribute. "
-    "Там технически подтверждается что у тебя активная подписка. "
-    "Постов там почти нет, можно не заглядывать."
+    "💎 <b>Pro</b> — что получаешь:\n\n"
+    "• Несколько подборок вакансий в день вместо одной\n"
+    "• До 5 вакансий за подборку вместо 3\n"
+    "• До 5 сопроводительных в день вместо 1\n\n"
+    "<b>Два варианта оплаты:</b>\n\n"
+    "🔁 <b>990₽ / месяц</b> — продлевается автоматически. "
+    "Для тех кто настроен искать обстоятельно.\n\n"
+    "⚡️ <b>349₽ / неделя</b> — тоже с автопродлением, можно отменить в любой момент. "
+    "Для тех кто хочет быстро попробовать.\n\n"
+    "Оплата картой любого банка. После оплаты попадёшь в мой канал @{channel} — "
+    "так работает Tribute. Там я делюсь апдейтами по боту и заметками о поиске работы."
+    "Не выходи из канала — подписка может отключиться. "
 )
 
 
@@ -64,19 +66,27 @@ async def cmd_upgrade(message: Message) -> None:
         return
 
     # Проверка что ссылка на оплату сконфигурирована
-    if not settings.tribute_subscription_url:
-        log.error("tribute_subscription_url_not_configured")
+    if not settings.tribute_subscription_monthly_url or not settings.tribute_subscription_weekly_url:
+        log.error(
+            "tribute_subscription_urls_not_configured",
+            monthly=bool(settings.tribute_subscription_monthly_url),
+            weekly=bool(settings.tribute_subscription_weekly_url),
+        )
         await message.answer(
             "У меня тут что-то не настроено с оплатой. Напиши @puniapple, разберёмся."
         )
         return
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
-            text="💳 Оформить Pro за 990₽/мес",
-            url=settings.tribute_subscription_url,
-        )
-    ]])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="🔁 990₽ / месяц",
+            url=settings.tribute_subscription_monthly_url,
+        )],
+        [InlineKeyboardButton(
+            text="⚡️ 349₽ / неделя",
+            url=settings.tribute_subscription_weekly_url,
+        )],
+    ])
     await message.answer(
         UPGRADE_TEXT.format(channel=settings.tribute_channel_username),
         reply_markup=kb,

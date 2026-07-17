@@ -28,9 +28,11 @@ class Settings(BaseSettings):
     tribute_base_url: str = Field(default="https://tribute.tg/api/v1")
     tribute_webhook_path: str = Field(default="/webhooks/tribute")
 
-    # URL страницы оплаты подписки в Tribute (получаешь после создания подписки в дашборде)
+    # URL страницы оплаты месячной подписки в Tribute (получаешь после создания подписки в дашборде)
     # Пример: https://t.me/tribute/app?startapp=sZWl
-    tribute_subscription_url: str = Field(default="")
+    tribute_subscription_monthly_url: str = Field(default="")
+    # URL страницы оплаты недельной подписки в Tribute (получаешь после создания подписки в дашборде)
+    tribute_subscription_weekly_url: str = Field(default="")
 
     # Username канала-гейта (без @). Юзер после оплаты попадёт в этот канал автоматически.
     tribute_channel_username: str = Field(default="puniapple_findjob")
