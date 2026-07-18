@@ -178,7 +178,7 @@ async def callback_add_to_profile(callback: CallbackQuery) -> None:
         )
     except Exception as e:
         logger.exception("CV processing failed")
-        await callback.message.answer(f"Не получилось разобрать резюме: {e}")
+        await callback.message.answer(f"Не получилось прочитать твой PDF. Попробуй другой файл — или расскажи голосом, тоже работает.")
         await callback.answer()
         return
 
@@ -233,7 +233,7 @@ async def callback_find_under_cv(callback: CallbackQuery) -> None:
         )
     except Exception as e:
         logger.exception("CV processing failed")
-        await callback.message.answer(f"Не получилось разобрать резюме: {e}")
+        await callback.message.answer(f"Не получилось прочитать твой PDF. Попробуй другой файл — или расскажи голосом, тоже работает.")
         await callback.answer()
         return
 

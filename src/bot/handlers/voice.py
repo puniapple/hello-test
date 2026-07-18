@@ -72,7 +72,7 @@ async def handle_voice(message: Message) -> None:
         tmp_path.unlink(missing_ok=True)
 
     if not transcript:
-        await notice.edit_text("Не услышала ничего разборчивого. Попробуй ещё раз.")
+        await notice.edit_text("Что-то не получилось расслышать. Попробуй ещё раз — или напиши текстом.")
         return
 
     await notice.edit_text(f"🎧 Услышала: «{transcript}»")

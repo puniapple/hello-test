@@ -27,8 +27,7 @@ async def handle_text_in_editing(message: Message) -> None:
 
     if user.state != UserState.editing_profile:
         await message.answer(
-            "Чтобы я тебя понимал — запусти /edit_profile для сборки профиля "
-            "или используй команды из /help."
+            "Если хочешь обновить профиль — /edit_profile\nВсе команды — /help"
         )
         return
 
@@ -95,12 +94,22 @@ async def handle_start_search(callback: CallbackQuery) -> None:
         await session.commit()
 
     await callback.answer("Запускаю поиск! Это займёт пару минут.", show_alert=False)
-    await callback.message.answer(
-        "🚀 Поиск запущен.\n\n"
-        "Бот будет автоматически проверять источники каждый день и присылать "
-        "релевантные вакансии. Ты можешь продолжать дополнять профиль в любой момент — "
-        "новые ответы попадут в учёт.\n\n"
-    )
+    # Определяем тариф для персонализации текста
+    if user.plan == "grandfather" or (user.plan == "pro" and user.subscription_status == "pro_active"):
+        activation_text = (
+            "Готово, ты в поиске 🚀\n\n"
+            "Я буду присылать подборки несколько раз в день — до 5 самых подходящих вакансий за раз. "
+            "Под каждой будет кнопка ✍️ Написать сопроводительное — тебе доступно до 5 сопроводительных в день.\n\n"
+            "Если захочешь скорректировать запрос — возвращайся в /edit_profile"
+        )
+    else:
+        activation_text = (
+            "Готово, ты в поиске 🚀\n\n"
+            "Я буду присылать подборку раз в день — до 3 самых подходящих вакансий. "
+            "Под каждой будет кнопка ✍️ Написать сопроводительное — на Free доступно 1 сопроводительное в день.\n\n"
+            "Хочешь больше? На Pro я работаю несколько раз в день, присылаю до 5 вакансий за раз и пишу до 5 сопроводительных в день. От 349₽ в неделю — /upgrade"
+        )
+    await callback.message.answer(activation_text)
 
     # Запускаем первый цикл в фоне
     from src.workers.job_search import _process_user
@@ -123,8 +132,17 @@ async def handle_done(callback: CallbackQuery) -> None:
         await session.commit()
 
     await callback.answer("Режим редактирования завершён", show_alert=False)
-    await callback.message.answer(
-        "✅ Готово. Если ещё не нажал кнопку 'Начать поиск' — бот вакансии присылать не будет.\n\n"
-        "Вернуться к редактированию: /edit_profile\n"
-        "Начать поиск: /resume"
-    )
+    # После /done проверяем готов ли профиль
+    is_ready = user.profile_ready_for_search
+    if is_ready:
+        text = (
+            "Окей, останавливаемся ✅\n\n"
+            "Профиль выглядит готовым к поиску. Обновить или дополнить — /edit_profile"
+        )
+    else:
+        text = (
+            "Окей, останавливаемся ✅\n\n"
+            "В профиле пока маловато информации для поиска — давай вернёмся, когда будет время. Я буду тут.\n\n"
+            "Когда будешь готов — /edit_profile"
+        )
+    await callback.message.answer(text)

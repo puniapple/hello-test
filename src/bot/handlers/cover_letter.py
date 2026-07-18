@@ -102,14 +102,13 @@ async def handle_cover_letter(callback: CallbackQuery) -> None:
         if used >= limit:
             if plan == "free":
                 text = (
-                    "На Free тарифе доступно 1 сопроводительное в день.\n"
-                    "Следующее можно будет написать через сутки.\n\n"
-                    "На Pro — 5 писем в день. /upgrade"
+                    "На Free я могу написать 1 сопроводительное в день — и я его уже написал. За следующим приходи завтра.\n\n"
+                    "Хочешь больше? На Pro можно до 5 сопроводительных в день. От 349₽ в неделю — /upgrade"
                 )
             else:
                 text = (
-                    f"Лимит {limit} писем в день исчерпан.\n"
-                    "Следующее можно будет написать через сутки."
+                    f"На сегодня всё — ты израсходовал все 5 сопроводительных за день. Следующее письмо напишу завтра.\n\n"
+                    f"Если тебе нужно больше — напиши @puniapple, что-нибудь придумаем."
                 )
             await callback.message.answer(text)
             await callback.answer()
@@ -141,8 +140,7 @@ async def handle_cover_letter(callback: CallbackQuery) -> None:
         except Exception as e:
             log.error("cover_letter_failed", user_id=user.id, error=str(e))
             await thinking_msg.edit_text(
-                "У меня не получилось написать сопроводительное. Попробуй ещё раз.\n"
-                "Если повторяется — напиши @puniapple."
+                "Что-то у меня не получилось сгенерировать сопроводительное. Попробуй ещё раз через минуту — эта попытка не зачлась в дневной лимит.\n\nЕсли повторяется — напиши @puniapple."
             )
             return
 
@@ -158,12 +156,10 @@ async def handle_cover_letter(callback: CallbackQuery) -> None:
 
         remaining = limit - used - 1
         footer_parts = [f"Осталось на сегодня: {remaining} из {limit}"]
-        if plan == "free" and remaining == 0:
-            footer_parts.append("На Pro — 5 писем в день. /upgrade")
         footer = "\n\n_" + " · ".join(footer_parts) + "_"
 
-        # Отправляем письмо + подпись отдельным сообщением
-        # (не редактируем "Пишу…", потому что письмо может быть длинным)
+        # Отправляем письмо c шапкой сверху и футером
         await thinking_msg.delete()
-        await callback.message.answer(letter)
+        header = "Готово, лови сопроводительное — под эту вакансию и твой профиль:\n\n"
+        await callback.message.answer(header + letter)
         await callback.message.answer(footer, parse_mode="Markdown")

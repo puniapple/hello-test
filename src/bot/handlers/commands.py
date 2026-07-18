@@ -18,28 +18,45 @@ from src.db.session import async_session
 router = Router()
 
 
-WELCOME_TEXT = (
-    'Привет! Это <a href="https://t.me/+O4j3RGUm50NjMmIy">Ульяна</a>. '
-    'Я создала этого бота, потому что устала искать вакансию мечты на '
-    'кладбище рынка труда.\n\n'
-    'Что он умеет:\n\n'
-    '🎯 <b>Понимает тебя глубже резюме.</b> Через короткий разговор разбирается, '
-    'к чему лежит душа — даже если ты сам не уверен, кем хочешь быть дальше. '
-    'Биздев, продукт, EdTech, M&A — бот ловит суть, а не просто ключевые слова.\n\n'
-    '🔍 <b>Сам обходит источники.</b> Несколько раз в день проверяет авторские карьерные '
-    'тг-каналы и страницы топ-компаний (не использует агрегаторы — там слишком много мусора). '
-    'Через AI оценивает каждую вакансию под твой профиль и присылает только релевантные.\n\n'
-    '🎙 <b>Общайся как удобно.</b> Можно писать текстом, наговаривать голосовыми, '
-    'присылать резюме в PDF — бот всё разберёт и вытащит фактологию сам.\n\n'
-    '<b>С чего начать:</b> жми /edit_profile — соберём твой профиль через диалог.\n\n'
-    '<b>Все команды:</b>\n'
-    '/edit_profile — собрать или обновить профиль\n'
-    '/show_profile — показать текущий профиль\n'
-    '/done — выйти из режима редактирования\n'
-    '/stats — твоя статистика\n'
-    '/pause — поставить на паузу\n'
-    '/resume — возобновить\n\n'
-    'С багами и любым фидбэком — ко мне в личку <a href="https://t.me/puniapple">@puniapple</a>'
+WELCOME_TEXT_NEW = (
+    "Привет! Это Ульяна. Я создала этого бота, потому что устала искать вакансию мечты на кладбище рынка труда.\n\n"
+    "Что он умеет:\n\n"
+    "🎯 <b>Понимает тебя глубже резюме.</b> Через короткий разговор разбирается, к чему лежит душа — даже если ты сам не уверен, кем хочешь быть дальше. Биздев, продукт, EdTech, M&A — бот ловит суть, а не просто ключевые слова.\n\n"
+    "🔍 <b>Сам обходит источники.</b> Регулярно проверяет 100+ авторских карьерных тг-каналов и страниц топ-компаний (не использует агрегаторы — там слишком много мусора). Через AI оценивает каждую вакансию под твой профиль и присылает только релевантные.\n\n"
+    "🎙 <b>Общайся как удобно.</b> Можно писать текстом, наговаривать голосовыми, присылать резюме в PDF — бот всё разберёт и вытащит фактологию сам.\n\n"
+    "✍️ <b>Пишет сопроводительные письма.</b> Персонализированные, с учётом твоего профиля и того, что ищет компания — остаётся только скопировать и отправить.\n\n"
+    "💎 <b>Бесплатно или с Pro.</b>\n"
+    "Бесплатно — 1 подборка в день, до 3 вакансий, 1 сопроводительное в день. Нужна подписка на мой канал.\n"
+    "С Pro — несколько подборок в день, до 5 вакансий в каждой, до 5 сопроводительных в день. На неделю — 349₽, на месяц — 990₽. Выбрать можно после знакомства.\n\n"
+    "Нажимая «Начать», ты соглашаешься с <a href=\"https://telegra.ph/Publichnaya-oferta-na-okazanie-uslug-servisa-Najdi-mne-rabotu-07-04\">Офертой и Политикой обработки персональных данных</a>."
+)
+
+WELCOME_TEXT_RETURNING = (
+    "Привет, рад тебя видеть.\n\n"
+    "Ты уже в поиске — следующая подборка придёт сама.\n\n"
+    "Что можно сделать:\n"
+    "/edit_profile — обновить профиль\n"
+    "/my_plan — посмотреть свой тариф\n"
+    "/pause — поставить поиск на паузу\n"
+    "/help — все команды"
+)
+
+HELP_TEXT = (
+    "Что я умею:\n\n"
+    "🔍 Ищу вакансии по твоему профилю каждый день\n"
+    "🎙 Понимаю голосовые\n"
+    "📄 Читаю PDF с резюме и подгружаю инфу в профиль\n"
+    "🤖 Оцениваю вакансии по релевантности твоему профилю и присылаю топ\n"
+    "✍️ Пишу сопроводительные письма под вакансии\n\n"
+    "Команды:\n"
+    "/edit_profile — обновить или дополнить профиль\n"
+    "/my_plan — мой тариф и статус подписки\n"
+    "/upgrade — перейти на Pro\n"
+    "/pause — пауза поиска\n"
+    "/resume — возобновить поиск\n"
+    "/cancel_subscription — отменить подписку\n"
+    "/done — закончить разговор о профиле\n\n"
+    "Что-то сломалось? Напиши @puniapple"
 )
 
 
@@ -76,9 +93,21 @@ async def cmd_start(message: Message) -> None:
         if not subscribed:
             await _send_subscription_gate(message)
             return
-
-    # Обычный flow
-    await message.answer(WELCOME_TEXT, parse_mode="HTML", disable_web_page_preview=True)
+    
+    # Проверяем — новый юзер или вернувшийся с активным поиском
+    async with async_session() as session:
+        result = await session.execute(
+            select(User).where(User.telegram_id == message.from_user.id)
+        )
+        existing_user = result.scalar_one_or_none()
+    
+    if existing_user and existing_user.profile_ready_for_search and existing_user.is_active:
+        # Вернувшийся с активным поиском (1.2)
+        await message.answer(WELCOME_TEXT_RETURNING, parse_mode="HTML", disable_web_page_preview=True)
+    else:
+        # Новый юзер (1.1)
+        await message.answer(WELCOME_TEXT_NEW, parse_mode="HTML", disable_web_page_preview=True)
+    
     asyncio.create_task(
         get_or_create_user(
             telegram_id=message.from_user.id,
@@ -88,7 +117,7 @@ async def cmd_start(message: Message) -> None:
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
-    await message.answer(WELCOME_TEXT, parse_mode="HTML", disable_web_page_preview=True)
+    await message.answer(HELP_TEXT, parse_mode="HTML", disable_web_page_preview=True)
 
 
 @router.message(Command("show_profile"))
@@ -253,7 +282,7 @@ async def cmd_pause(message: Message) -> None:
             user.state = UserState.paused
             user.is_active = False
             await session.commit()
-    await message.answer("Поставила на паузу. /resume — возобновить.")
+    await message.answer("Поиск поставлен на паузу.\n\nНе буду ничего присылать, пока ты не нажмёшь /resume. Профиль и история сохранены — возвращаться можно когда угодно.")
 
 
 @router.message(Command("resume"))
@@ -283,8 +312,7 @@ async def cmd_resume(message: Message) -> None:
         user.profile_ready_for_search = True
         await session.commit()
     await message.answer(
-        "🚀 Поиск возобновлён. Бот будет проверять источники каждый день "
-        "и присылать тебе релевантные вакансии."
+        "Поиск снова активен 🚀\n\nСледующая подборка придёт сама."
     )
 
 
@@ -634,7 +662,7 @@ async def handle_subscription_check(callback: CallbackQuery) -> None:
         except Exception:
             pass
         # Запускаем стандартный flow приветствия
-        await callback.message.answer(WELCOME_TEXT, parse_mode="HTML", disable_web_page_preview=True)
+        await callback.message.answer(WELCOME_TEXT_NEW, parse_mode="HTML", disable_web_page_preview=True)
         # И провижининг в фоне, как в обычном /start
         asyncio.create_task(
             get_or_create_user(
