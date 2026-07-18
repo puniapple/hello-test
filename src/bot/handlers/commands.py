@@ -246,23 +246,27 @@ async def cmd_show_profile(message: Message) -> None:
     await message.answer(text, parse_mode="HTML")
 
 @router.message(Command("edit_profile"))
-async def cmd_edit_profile(message: Message) -> None:
+async def _start_edit_profile(message: Message, telegram_id: int) -> None:
+    """Общая логика — принимает telegram_id явно (для использования из /edit_profile и callback)."""
     async with async_session() as session:
         result = await session.execute(
-            select(User).where(User.telegram_id == message.from_user.id)
+            select(User).where(User.telegram_id == telegram_id)
         )
         user = result.scalar_one_or_none()
         if user is None:
             await message.answer("Сначала напиши /start.")
             return
-
     claude = ClaudeService()
     agent = ProfileAgent(claude=claude)
-
     await message.bot.send_chat_action(chat_id=message.chat.id, action="typing")
     kickoff_text, first_reply = await agent.start_editing(user_id=user.id)
     await message.answer(kickoff_text)
     await message.answer(first_reply.text)
+
+
+@router.message(Command("edit_profile"))
+async def cmd_edit_profile(message: Message) -> None:
+    await _start_edit_profile(message, message.from_user.id)
 
 @router.message(Command("done"))
 async def cmd_done(message: Message) -> None:
@@ -691,6 +695,4 @@ async def handle_subscription_check(callback: CallbackQuery) -> None:
 async def handle_welcome_start(callback: CallbackQuery) -> None:
     """Юзер нажал 'Начать' на приветственном экране — запускаем /edit_profile."""
     await callback.answer()
-    # Переиспользуем логику /edit_profile
-    from src.bot.handlers.profile_edit import cmd_edit_profile
-    await cmd_edit_profile(callback.message)
+    await _start_edit_profile(callback.message, callback.from_user.id)
