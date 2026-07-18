@@ -101,12 +101,23 @@ async def cmd_start(message: Message) -> None:
         )
         existing_user = result.scalar_one_or_none()
     
-    if existing_user and existing_user.profile_ready_for_search and existing_user.is_active:
+    is_pro_or_grandfather = existing_user and existing_user.plan in ("pro", "grandfather")
+    is_active_with_profile = existing_user and existing_user.profile_ready_for_search and existing_user.is_active
+    
+    if is_active_with_profile or is_pro_or_grandfather:
         # Вернувшийся с активным поиском (1.2)
         await message.answer(WELCOME_TEXT_RETURNING, parse_mode="HTML", disable_web_page_preview=True)
     else:
         # Новый юзер (1.1)
-        await message.answer(WELCOME_TEXT_NEW, parse_mode="HTML", disable_web_page_preview=True)
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🚀 Начать", callback_data="welcome:start")
+        ]])
+        await message.answer(
+            WELCOME_TEXT_NEW,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=kb,
+        )
     
     asyncio.create_task(
         get_or_create_user(
@@ -676,3 +687,10 @@ async def handle_subscription_check(callback: CallbackQuery) -> None:
             show_alert=True,
         )
 
+@router.callback_query(F.data == "welcome:start")
+async def handle_welcome_start(callback: CallbackQuery) -> None:
+    """Юзер нажал 'Начать' на приветственном экране — запускаем /edit_profile."""
+    await callback.answer()
+    # Переиспользуем логику /edit_profile
+    from src.bot.handlers.profile_edit import cmd_edit_profile
+    await cmd_edit_profile(callback.message)
