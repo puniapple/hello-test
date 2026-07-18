@@ -133,13 +133,17 @@ async def _process_user(bot: Bot, user: User) -> dict:
         if not fresh:
             return {"fetched": len(all_fetched), "matched": 0, "delivered": 0}
 
-        # 5. Rank by lexical overlap with profile, then cap. Niche users see
-        # their relevant vacancies even when the pool is broad.
+        # 5. Rank by lexical overlap with profile, then cap.
+        # Free — 50 ваков в матчинг, Pro/Grandfather — 100.
         from src.services.prefilter import rank_vacancies
         ranked = rank_vacancies(fresh, profile.profile_data)
-        to_match = ranked[:MAX_VACANCIES_PER_USER_PER_CYCLE]
-        deferred = fresh[MAX_VACANCIES_PER_USER_PER_CYCLE:]
-        log.info("matching", count=len(to_match), deferred=len(deferred))
+        is_paid = user.plan == "grandfather" or (
+            user.plan == "pro" and user.plan_expires_at and user.plan_expires_at > now_utc
+        )
+        user_cap = MAX_VACANCIES_PER_USER_PER_CYCLE if is_paid else MAX_VACANCIES_PER_USER_PER_CYCLE // 2
+        to_match = ranked[:user_cap]
+        deferred = fresh[user_cap:]
+        log.info("matching", count=len(to_match), deferred=len(deferred), user_cap=user_cap)
 
         # 6. Mark only matched items as seen. Deferred ones stay unseen
         # so they can be picked up in subsequent cycles, not lost forever.
@@ -316,10 +320,15 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
 
                     if fresh:
                         # 5. Pre-filter + cap
+                        # Free — 50 ваков в матчинг, Pro/Grandfather — 100.
                         from src.services.prefilter import rank_vacancies
                         ranked = rank_vacancies(fresh, profile.profile_data)
-                        to_match = ranked[:MAX_VACANCIES_PER_USER_PER_CYCLE]
-                        log.info("matching_buffer", count=len(to_match))
+                        is_paid = user.plan == "grandfather" or (
+                            user.plan == "pro" and user.plan_expires_at and user.plan_expires_at > now_utc
+                        )
+                        user_cap = MAX_VACANCIES_PER_USER_PER_CYCLE if is_paid else MAX_VACANCIES_PER_USER_PER_CYCLE // 2
+                        to_match = ranked[:user_cap]
+                        log.info("matching_buffer", count=len(to_match), user_cap=user_cap)
 
                         # 6. Mark seen
                         await mark_seen(session, user.id, to_match)
