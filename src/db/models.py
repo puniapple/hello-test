@@ -200,3 +200,28 @@ class CoverLetterUsage(Base):
         nullable=False,
         index=True,
     )
+
+class ResumeUsage(Base):
+    """Логирует каждое сгенерированное адаптированное резюме.
+
+    Для Free — лимит 1 за всю жизнь юзера (COUNT все записи).
+    Для Pro/Grandfather — лимит 3 в скользящем окне 24ч.
+    """
+    __tablename__ = "resume_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    vacancy_match_id: Mapped[int | None] = mapped_column(
+        ForeignKey("vacancy_matches.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
