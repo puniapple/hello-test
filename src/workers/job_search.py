@@ -86,14 +86,13 @@ async def run_job_search_cycle(bot: Bot) -> dict:
 async def _process_user(bot: Bot, user: User) -> dict:
     """Full pipeline for one user."""
     log = logger.bind(user_id=user.id, telegram_id=user.telegram_id)
-
     use_buffer = (
         BUFFER_MODE == "all"
         or (BUFFER_MODE == "test" and user.telegram_id in BUFFER_TEST_USERS)
     )
     if use_buffer:
         return await _process_user_with_buffer(bot, user, log)
-
+    now_utc = datetime.now(timezone.utc)
     # Subscription gate: если канал настроен и юзер отписался — пропускаем
     from src.services.subscription import is_required_channel_configured, is_subscribed
     if is_required_channel_configured():
