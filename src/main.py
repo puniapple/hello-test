@@ -18,6 +18,7 @@ from src.bot.handlers.payments import router as payments_router
 from src.bot.handlers.profile_edit import router as profile_edit_router
 from src.bot.handlers.reactions import router as reactions_router
 from src.bot.handlers.cover_letter import router as cover_letter_router
+from src.bot.handlers.resume import router as resume_router
 from src.bot.handlers.voice import router as voice_router
 from src.config import settings
 from src.db.session import async_session
@@ -69,6 +70,7 @@ async def main() -> None:
     dp.include_router(commands_router)
     dp.include_router(reactions_router)
     dp.include_router(cover_letter_router)
+    dp.include_router(resume_router)
     dp.include_router(cv_upload_router)
     dp.include_router(voice_router)
     dp.include_router(profile_edit_router)
