@@ -1,8 +1,6 @@
 """Formatting and inline keyboard for vacancy delivery messages."""
 from __future__ import annotations
 
-import re
-
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.agents.matcher import MatchResult
@@ -67,21 +65,22 @@ def _escape_url(url: str) -> str:
 
 
 def build_reaction_keyboard(match_id: int) -> InlineKeyboardMarkup:
-    """Inline buttons for reactions + cover letter generation."""
+    """Inline buttons: cover letter + resume adaptation.
+
+    Реакции 👍/👎/📨 убраны — по данным использования (см. SQL от 2026-07),
+    большинство юзеров ими не пользуются, а те кто пользуется — жмут почти
+    исключительно 👎 как жалобу. Полезнее иметь две функциональные кнопки.
+    Хендлеры react:* и модель UserReaction остаются в коде на случай отката.
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [
-                InlineKeyboardButton(text="👍 интересно", callback_data=f"react:liked:{match_id}"),
-                InlineKeyboardButton(text="👎 не моё", callback_data=f"react:disliked:{match_id}"),
-            ],
-            [
-                InlineKeyboardButton(text="📨 откликнулась", callback_data=f"react:applied:{match_id}"),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="✍️ Написать сопроводительное",
-                    callback_data=f"cover:generate:{match_id}",
-                ),
-            ],
+            [InlineKeyboardButton(
+                text="✍️ Написать сопроводительное",
+                callback_data=f"cover:generate:{match_id}",
+            )],
+            [InlineKeyboardButton(
+                text="📄 Резюме под вакансию",
+                callback_data=f"resume:generate:{match_id}",
+            )],
         ]
     )
