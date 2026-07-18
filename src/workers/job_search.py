@@ -392,21 +392,29 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
             .where(VacancyMatch.delivered_at >= today_start)
         ) or 0
         # Дневной лимит доставки зависит от тарифа юзера.
-        # По оферте: Free — 3/день, Pro — 15/день. Grandfather — как Pro.
-        # Считаем истёкшую Pro-подписку как Free.
-        if user.plan == "pro" and user.plan_expires_at and user.plan_expires_at > now_utc:
+        # Free — 3 ваков ТОЛЬКО в первом (matching) цикле дня, потом до завтра ничего.
+        # Pro/Grandfather — 15 ваков, размазанные по 3 циклам.
+        is_paid = user.plan == "grandfather" or (
+            user.plan == "pro" and user.plan_expires_at and user.plan_expires_at > now_utc
+        )
+        
+        if is_paid:
             DAILY_LIMIT = 15
-        elif user.plan == "grandfather":
-            DAILY_LIMIT = 15
+            remaining_today = max(0, DAILY_LIMIT - delivered_today)
+            if is_matching_cycle:
+                remaining_cycles = CYCLES_PER_DAY
+            else:
+                cycles_done = await _estimate_cycles_done(session, user.id, today_start, now_utc)
+                remaining_cycles = max(1, CYCLES_PER_DAY - cycles_done)
         else:
+            # Free: только в matching-цикле, максимум 3 за раз, потом до завтра ничего
             DAILY_LIMIT = 3
-        remaining_today = max(0, DAILY_LIMIT - delivered_today)
-        # Сколько циклов осталось до конца дня (включая текущий)
-        if is_matching_cycle:
-            remaining_cycles = CYCLES_PER_DAY
-        else:
-            cycles_done = await _estimate_cycles_done(session, user.id, today_start, now_utc)
-            remaining_cycles = max(1, CYCLES_PER_DAY - cycles_done)
+            if is_matching_cycle:
+                remaining_today = max(0, DAILY_LIMIT - delivered_today)
+                remaining_cycles = 1  # шлём всё сразу
+            else:
+                remaining_today = 0  # в delivery-циклах Free ничего не получает
+                remaining_cycles = 1
         # Сколько отправить сейчас: равномерно по оставшимся циклам, но не больше остатка на день
         if len(buffer) == 0 or remaining_today == 0:
             to_send_now = 0
