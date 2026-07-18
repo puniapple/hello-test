@@ -6,3 +6,9 @@ __pycache__/
 .idea/
 volumes/
 *.egg-info/
+dump_messages.py
+all_bot_texts.txt
+test_broadcast.py
+dump_messages.py
+all_bot_texts.txt
+test_broadcast.py

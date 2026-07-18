@@ -277,8 +277,7 @@ async def send_renewal_reminders(session: AsyncSession, bot=None) -> dict:
             text = (
                 f"Через 7 дней — {user.plan_expires_at.strftime('%d.%m.%Y')} — "
                 f"спишется 990₽ за следующий месяц Pro.\n\n"
-                f"Если хочешь отменить заранее — /cancel_subscription. "
-                f"Никаких автосписаний без твоего ведома.\n\n"
+                f"Если хочешь отменить заранее — /cancel_subscription. Никаких автосписаний без твоего ведома.\n\n"
                 f"Всё ок — ничего делать не надо."
             )
             await bot.send_message(user.telegram_id, text)
