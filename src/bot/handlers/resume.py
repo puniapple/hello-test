@@ -98,8 +98,8 @@ async def handle_resume(callback: CallbackQuery) -> None:
             already = await _count_lifetime(session, user.id)
             if already >= FREE_LIFETIME_LIMIT:
                 await callback.message.answer(
-                    "На бесплатном тарифе тебе доступно одно резюме, мы его уже написали.\n\n"
-                    "В Pro я собираю по 3 резюме в день. Попробовать — /upgrade"
+                    "На Free я могу собрать одно резюме.\n\n"
+                    "Хочешь ещё? На Pro тебе доступно до 3 резюме в день. От 349₽ в неделю — /upgrade"
                 )
                 await callback.answer()
                 return
@@ -107,8 +107,8 @@ async def handle_resume(callback: CallbackQuery) -> None:
             recent = await _count_last_24h(session, user.id)
             if recent >= PAID_ROLLING_LIMIT:
                 await callback.message.answer(
-                    f"На сегодня всё — три резюме за сутки я уже собрал. Возвращайся завтра.\n\n"
-                    "Если срочно нужно ещё — напиши @puniapple."
+                    "Сегодня я собрал для тебя 3 резюме. Следующие 3 будут доступны завтра.\n\n"
+                    "Если срочно нужно ещё одно — напиши @puniapple, что-нибудь придумаем."
                 )
                 await callback.answer()
                 return
@@ -139,8 +139,8 @@ async def handle_resume(callback: CallbackQuery) -> None:
         except Exception as e:
             log.error("resume_generation_failed", user_id=user.id, error=str(e))
             await thinking_msg.edit_text(
-                "У меня не получилось собрать резюме. Попробуй ещё раз через минуту.\n"
-                "Если повторяется — напиши @puniapple. Эта попытка не зачлась в лимит."
+                "Что-то не получилось собрать резюме. Попробуй ещё раз через минуту — эта попытка не зачлась в лимит.\n\n"
+                "Если повторяется — напиши @puniapple."
             )
             return
 
