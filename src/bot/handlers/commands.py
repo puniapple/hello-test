@@ -247,7 +247,6 @@ async def cmd_show_profile(message: Message) -> None:
 
     await message.answer(text, parse_mode="HTML")
 
-@router.message(Command("edit_profile"))
 async def _start_edit_profile(message: Message, telegram_id: int) -> None:
     """Общая логика — принимает telegram_id явно (для использования из /edit_profile и callback)."""
     async with async_session() as session:
