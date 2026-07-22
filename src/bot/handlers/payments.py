@@ -44,6 +44,7 @@ UPGRADE_TEXT = (
 
 @router.message(Command("upgrade"))
 async def cmd_upgrade(message: Message) -> None:
+    log.info("upgrade_opened", telegram_id=message.from_user.id)
     user_id = message.from_user.id
 
     async with async_session() as session:
@@ -117,6 +118,7 @@ CANCEL_INSTRUCTIONS = (
 
 @router.message(Command("cancel_subscription"))
 async def cmd_cancel_subscription(message: Message) -> None:
+    log.info("cancel_opened", telegram_id=message.from_user.id)
     user_id = message.from_user.id
 
     async with async_session() as session:
@@ -156,6 +158,7 @@ async def cmd_cancel_subscription(message: Message) -> None:
 
 @router.message(Command("my_plan"))
 async def cmd_my_plan(message: Message) -> None:
+    log.info("my_plan_opened", telegram_id=message.from_user.id)
     user_id = message.from_user.id
     async with async_session() as session:
         result = await session.execute(
