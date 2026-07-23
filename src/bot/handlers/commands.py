@@ -658,7 +658,7 @@ async def _send_subscription_gate(message: Message) -> None:
     ])
     text = (
         "Чтобы пользоваться ботом бесплатно, подпишись на мой канал — там я делюсь апдейтами про бота и кидаю полезное про поиск работы.\n\n"
-        "<a href=\"https://t.me/+O4j3RGUm50NjMmIy\">«Можно иначе»\n\n"
+        "<a href=\"https://t.me/+O4j3RGUm50NjMmIy\">«Можно иначе»</a>\n\n"
         "Подпишись и нажми кнопку ниже."
     )
     await message.answer(text, reply_markup=keyboard)
@@ -667,6 +667,8 @@ async def _send_subscription_gate(message: Message) -> None:
 @router.callback_query(F.data == "sub:check")
 async def handle_subscription_check(callback: CallbackQuery) -> None:
     """Юзер нажал 'я подписался, проверь' — повторно проверяем."""
+    from src.services.subscription import invalidate_subscription_cache
+    invalidate_subscription_cache(callback.from_user.id)
     subscribed = await is_subscribed(callback.bot, callback.from_user.id)
     if subscribed:
         await callback.answer("✅ Подписка подтверждена!", show_alert=False)

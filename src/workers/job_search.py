@@ -94,11 +94,17 @@ async def _process_user(bot: Bot, user: User) -> dict:
         return await _process_user_with_buffer(bot, user, log)
     now_utc = datetime.now(timezone.utc)
     # Subscription gate: если канал настроен и юзер отписался — пропускаем
-    from src.services.subscription import is_required_channel_configured, is_subscribed
+    from src.services.subscription import (
+        is_required_channel_configured,
+        is_subscribed,
+        notify_if_unsubscribed,
+    )
     if is_required_channel_configured():
         subscribed = await is_subscribed(bot, user.telegram_id)
         if not subscribed:
             log.info("skip_not_subscribed")
+            # Одноразовая нотификация с 7-дневным cooldown
+            await notify_if_unsubscribed(bot, user)
             return {"fetched": 0, "matched": 0, "delivered": 0}
 
     async with async_session() as session:
@@ -223,11 +229,17 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
     Buffer = VacancyMatch records with delivered_at IS NULL.
     """
     # Subscription gate (как в обычной функции)
-    from src.services.subscription import is_required_channel_configured, is_subscribed
+    from src.services.subscription import (
+        is_required_channel_configured,
+        is_subscribed,
+        notify_if_unsubscribed,
+    )
     if is_required_channel_configured():
         subscribed = await is_subscribed(bot, user.telegram_id)
         if not subscribed:
-            log.info("skip_not_subscribed_buffer")
+            log.info("skip_not_subscribed")
+            # Одноразовая нотификация с 7-дневным cooldown
+            await notify_if_unsubscribed(bot, user)
             return {"fetched": 0, "matched": 0, "delivered": 0}
 
     now_utc = datetime.now(timezone.utc)
