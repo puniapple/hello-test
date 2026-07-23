@@ -200,3 +200,20 @@ async def notify_if_unsubscribed(bot: Bot, user: User) -> bool:
         db_user.gate_notified_at = datetime.now(timezone.utc)
         await session.commit()
         return True
+
+async def send_gate_prompt(bot: Bot, chat_id: int) -> None:
+    """Показывает короткое сообщение 'подпишись на канал' с кнопкой.
+
+    Используется в handler'ах фич (сопроводительное, резюме) когда
+    юзер не подписан. В отличие от _send_subscription_gate из commands.py,
+    здесь без вступительной секции — короткое напоминание в моменте.
+    """
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Перейти в канал", url=CHANNEL_INVITE_LINK)],
+        [InlineKeyboardButton(text="✅ Я подписался", callback_data="sub:check")],
+    ])
+    await bot.send_message(
+        chat_id=chat_id,
+        text="Подпишись на мой канал, чтобы продолжить пользоваться ботом.",
+        reply_markup=keyboard,
+    )

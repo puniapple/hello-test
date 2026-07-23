@@ -96,6 +96,21 @@ async def handle_cover_letter(callback: CallbackQuery) -> None:
 
         # Проверка лимита
         plan = (user.plan or "free").lower()
+
+        # Гейт подписки: только для Free
+        if plan == "free":
+            from src.services.subscription import (
+                is_required_channel_configured,
+                is_subscribed,
+                send_gate_prompt,
+            )
+            if is_required_channel_configured():
+                subscribed = await is_subscribed(callback.bot, user.telegram_id)
+                if not subscribed:
+                    await send_gate_prompt(callback.bot, callback.from_user.id)
+                    await callback.answer()
+                    return
+
         limit = COVER_LETTER_LIMITS.get(plan, DEFAULT_LIMIT)
         used = await _count_recent_letters(session, user.id)
 
