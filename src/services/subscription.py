@@ -30,9 +30,6 @@ SUBSCRIBED_STATUSES = {"creator", "administrator", "member"}
 CHANNEL_INVITE_LINK = "https://t.me/+O4j3RGUm50NjMmIy"
 CHANNEL_DISPLAY_NAME = "«Можно иначе»"
 
-# Как часто повторно уведомлять юзера об отписке
-GATE_NOTIFY_COOLDOWN = timedelta(days=7)
-
 # In-memory кеш: telegram_id → (is_subscribed, checked_at)
 _subscription_cache: dict[int, tuple[bool, datetime]] = {}
 CACHE_TTL = timedelta(hours=1)
@@ -153,21 +150,19 @@ def _build_unsubscribe_message() -> str:
 
 
 async def notify_if_unsubscribed(bot: Bot, user: User) -> bool:
-    """Отправляет юзеру одноразовое сообщение об отписке.
-
-    Возвращает True если сообщение было отправлено (или уже было отправлено недавно).
-    Возвращает False если юзер подписан либо уведомление не требуется.
+    """Отправляет юзеру ОДНОРАЗОВОЕ сообщение об отписке.
 
     Логика:
-    - Если юзер подписан → сбрасываем gate_notified_at (готовы уведомить снова)
-    - Если не подписан + gate_notified_at пустое ИЛИ старше 7 дней → шлём + метим
-    - Если не подписан + gate_notified_at свежий → молчим
+    - Если юзер подписан → сбрасываем gate_notified_at (готовы уведомить если снова отпишется)
+    - Если не подписан + ещё не уведомляли → шлём + метим
+    - Если не подписан + уже уведомляли → молчим (навсегда, пока не подпишется)
+
+    Возвращает True если сообщение было или пометка уже стоит.
+    Возвращает False если юзер подписан или отправка провалилась.
     """
-    # Проверяем текущий статус (использует кеш)
     subscribed = await is_subscribed(bot, user.telegram_id)
 
     async with async_session() as session:
-        # Свежая копия юзера — читаем/пишем в одной сессии
         result = await session.execute(
             select(User).where(User.id == user.id)
         )
@@ -176,21 +171,17 @@ async def notify_if_unsubscribed(bot: Bot, user: User) -> bool:
             return False
 
         if subscribed:
-            # Юзер вернулся — сбрасываем метку, готовы уведомить снова если снова отпишется
+            # Юзер вернулся — готовы уведомить снова если отпишется в будущем
             if db_user.gate_notified_at is not None:
                 db_user.gate_notified_at = None
                 await session.commit()
             return False
 
-        # Не подписан. Проверяем cooldown.
-        now = datetime.now(timezone.utc)
-        if (
-            db_user.gate_notified_at is not None
-            and now - db_user.gate_notified_at < GATE_NOTIFY_COOLDOWN
-        ):
-            return True  # уже уведомили недавно, молчим
+        # Не подписан. Если уже уведомляли — молчим навсегда.
+        if db_user.gate_notified_at is not None:
+            return True
 
-        # Шлём сообщение
+        # Шлём одноразовое сообщение
         try:
             await bot.send_message(
                 chat_id=db_user.telegram_id,
@@ -206,7 +197,6 @@ async def notify_if_unsubscribed(bot: Bot, user: User) -> bool:
             )
             return False
 
-        # Метим факт уведомления
-        db_user.gate_notified_at = now
+        db_user.gate_notified_at = datetime.now(timezone.utc)
         await session.commit()
         return True
