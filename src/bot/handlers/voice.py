@@ -80,6 +80,8 @@ async def handle_voice(message: Message) -> None:
     claude = ClaudeService()
     agent = ProfileAgent(claude=claude)
     reply = await agent.handle_message(user_id=user.id, user_text=transcript)
+    from src.services.profile_activation import try_auto_activate_search
+    await try_auto_activate_search(message.bot, user.id)
     await message.answer(reply.text)
 
     if reply.finalized:

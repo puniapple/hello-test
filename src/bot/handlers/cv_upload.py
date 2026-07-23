@@ -120,6 +120,8 @@ async def _feed_pdf_to_agent(
         user_text=f"Я прислал резюме '{filename}'. Разбери его и обнови профиль.",
         extra_content_blocks=[pdf_block],
     )
+    from src.services.profile_activation import try_auto_activate_search
+    await try_auto_activate_search(message.bot, user.id)
     await message.answer(reply.text)
     if reply.finalized:
         await message.answer("✅ Профиль обновлён. /show_profile")
@@ -176,6 +178,8 @@ async def callback_add_to_profile(callback: CallbackQuery) -> None:
             extra_content_blocks=[pdf_block],
             persist_user_message=False,
         )
+        from src.services.profile_activation import try_auto_activate_search
+        await try_auto_activate_search(message.bot, user.id)
     except Exception as e:
         logger.exception("CV processing failed")
         await callback.message.answer(f"Не получилось прочитать твой PDF. Попробуй другой файл — или расскажи голосом, тоже работает.")
@@ -231,6 +235,8 @@ async def callback_find_under_cv(callback: CallbackQuery) -> None:
             extra_content_blocks=[pdf_block],
             persist_user_message=False,
         )
+        from src.services.profile_activation import try_auto_activate_search
+        await try_auto_activate_search(message.bot, user.id)
     except Exception as e:
         logger.exception("CV processing failed")
         await callback.message.answer(f"Не получилось прочитать твой PDF. Попробуй другой файл — или расскажи голосом, тоже работает.")

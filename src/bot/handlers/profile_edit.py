@@ -36,6 +36,8 @@ async def handle_text_in_editing(message: Message) -> None:
     claude = ClaudeService()
     agent = ProfileAgent(claude=claude)
     reply = await agent.handle_message(user_id=user.id, user_text=message.text)
+    from src.services.profile_activation import try_auto_activate_search
+    await try_auto_activate_search(message.bot, user.id)
 
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -90,6 +92,9 @@ async def handle_start_search(callback: CallbackQuery) -> None:
             await callback.answer(reason, show_alert=True)
             return
 
+        if user.profile_ready_for_search:
+            await callback.answer("Уже в поиске 🚀 Первая подборка скоро придёт.", show_alert=False)
+            return
         user.profile_ready_for_search = True
         await session.commit()
 
