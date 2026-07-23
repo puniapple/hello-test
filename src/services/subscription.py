@@ -24,9 +24,11 @@ logger = logging.getLogger(__name__)
 
 SUBSCRIBED_STATUSES = {"creator", "administrator", "member"}
 
-# Ссылка на канал «Можно иначе»
+# Пригласительная ссылка на канал «Можно иначе» — канал приватный,
+# поэтому не выводится через get_channel_url() (тот возвращает t.me/handle
+# из env REQUIRED_CHANNEL_USERNAME).
 CHANNEL_INVITE_LINK = "https://t.me/+O4j3RGUm50NjMmIy"
-CHANNEL_DISPLAY_NAME = "Можно иначе"
+CHANNEL_DISPLAY_NAME = "«Можно иначе»"
 
 # Как часто повторно уведомлять юзера об отписке
 GATE_NOTIFY_COOLDOWN = timedelta(days=7)
@@ -39,6 +41,20 @@ CACHE_TTL = timedelta(hours=1)
 def is_required_channel_configured() -> bool:
     """True если в env задан канал — значит надо проверять подписку."""
     return bool(settings.required_channel_username.strip())
+
+
+def get_channel_url() -> str:
+    """URL для кнопки 'Перейти в канал'."""
+    channel = settings.required_channel_username.strip().lstrip("@")
+    return f"https://t.me/{channel}"
+
+
+def get_channel_display() -> str:
+    """Отображаемое имя канала для текстов."""
+    channel = settings.required_channel_username.strip()
+    if not channel.startswith("@"):
+        channel = "@" + channel
+    return channel
 
 
 def _is_admin(telegram_id: int) -> bool:
@@ -131,8 +147,8 @@ def _build_gate_notification_kb() -> InlineKeyboardMarkup:
 def _build_unsubscribe_message() -> str:
     """Текст сообщения при обнаружении отписки во время цикла матчинга."""
     return (
-        f"Ты отписался от канала [«{CHANNEL_DISPLAY_NAME}»]({CHANNEL_INVITE_LINK}) — "
-        f"я пока паузнул подборки. Подпишись обратно, и я продолжу присылать вакансии."
+        f'Ты отписался от канала <a href="{CHANNEL_INVITE_LINK}">{CHANNEL_DISPLAY_NAME}</a>, '
+        f'подпишись и я продолжу присылать тебе вакансии.'
     )
 
 
@@ -180,7 +196,7 @@ async def notify_if_unsubscribed(bot: Bot, user: User) -> bool:
                 chat_id=db_user.telegram_id,
                 text=_build_unsubscribe_message(),
                 reply_markup=_build_gate_notification_kb(),
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 disable_web_page_preview=True,
             )
         except TelegramAPIError as e:
