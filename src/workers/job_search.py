@@ -211,6 +211,11 @@ async def _process_user(bot: Bot, user: User) -> dict:
                 await asyncio.sleep(0.5)
             except (TelegramForbiddenError, TelegramBadRequest) as e:
                 log.info("user_blocked_bot", user_id=user.id, error=str(e))
+                await session.execute(
+                    update(User)
+                    .where(User.id == user.id)
+                    .values(is_active=False)
+                )
                 user.is_active = False
                 await session.commit()
                 return {"fetched": len(all_fetched), "matched": len(to_match), "delivered": sent_count}
@@ -258,6 +263,8 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
         )
 
         # ─── Обновляем счётчик пустых дней (раз в день, перед матчингом) ───
+        # user объект detached от текущей session (загружен в другой session в run_job_search_cycle).
+        # Поэтому обновления через ORM tracking не работают — используем прямой update(User).
         if is_matching_cycle:
             yesterday_start = today_start - timedelta(days=1)
             delivered_yesterday = await session.scalar(
@@ -267,12 +274,22 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
                 .where(VacancyMatch.delivered_at < today_start)
             ) or 0
             if delivered_yesterday == 0:
-                user.empty_streak_days = (user.empty_streak_days or 0) + 1
+                new_streak = (user.empty_streak_days or 0) + 1
+                await session.execute(
+                    update(User)
+                    .where(User.id == user.id)
+                    .values(empty_streak_days=new_streak)
+                )
+                user.empty_streak_days = new_streak  # sync in-memory для дальнейших проверок
             else:
-                if user.empty_streak_days:
-                    user.empty_streak_days = 0
-                if user.empty_notice_sent_at:
-                    user.empty_notice_sent_at = None
+                await session.execute(
+                    update(User)
+                    .where(User.id == user.id)
+                    .values(empty_streak_days=0, empty_notice_sent_at=None)
+                )
+                user.empty_streak_days = 0
+                user.empty_notice_sent_at = None
+            await session.commit()
             log.info(
                 "empty_streak_updated",
                 user_id=user.id,
@@ -292,14 +309,25 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
                             "Загляни в /edit_profile — я помогу."
                         ),
                     )
+                    await session.execute(
+                        update(User)
+                        .where(User.id == user.id)
+                        .values(empty_notice_sent_at=now_utc)
+                    )
                     user.empty_notice_sent_at = now_utc
+                    await session.commit()
                     log.info("empty_streak_notice_sent", user_id=user.id, streak=user.empty_streak_days)
                 except (TelegramForbiddenError, TelegramBadRequest) as e:
                     log.info("user_blocked_bot", user_id=user.id, error=str(e))
+                    await session.execute(
+                        update(User)
+                        .where(User.id == user.id)
+                        .values(is_active=False)
+                    )
                     user.is_active = False
+                    await session.commit()
                 except Exception as e:
                     log.warning("empty_streak_notice_failed", user_id=user.id, error=str(e))
-            await session.commit()
 
         # ─── Часть 1: матчинг (только в первом цикле дня) ───
         matched_count = 0
@@ -476,6 +504,11 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
                 await asyncio.sleep(0.5)
             except (TelegramForbiddenError, TelegramBadRequest) as e:
                 log.info("user_blocked_bot", user_id=user.id, error=str(e))
+                await session.execute(
+                    update(User)
+                    .where(User.id == user.id)
+                    .values(is_active=False)
+                )
                 user.is_active = False
                 await session.commit()
                 return {"fetched": fetched_count, "matched": matched_count, "delivered": sent_count}
