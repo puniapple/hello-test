@@ -237,6 +237,41 @@ async def health(request: web.Request) -> web.Response:
     """Health check для Railway."""
     return web.Response(status=200, text="ok")
 
+async def handle_click(request: web.Request) -> web.Response:
+    """Логирует клик на вакансию и редиректит на реальный URL."""
+    match_id_str = request.match_info.get("match_id", "")
+    try:
+        match_id = int(match_id_str)
+    except ValueError:
+        return web.Response(text="Bad match_id", status=400)
+    
+    from src.db.session import async_session
+    from src.db.models import VacancyMatch
+    from sqlalchemy import select, update
+    from datetime import datetime, timezone
+    
+    async with async_session() as session:
+        vm = (await session.execute(
+            select(VacancyMatch).where(VacancyMatch.id == match_id)
+        )).scalar_one_or_none()
+        
+        if vm is None:
+            return web.Response(text="Vacancy not found", status=404)
+        
+        url = vm.vacancy_data.get("url", "")
+        if not url:
+            return web.Response(text="No URL", status=404)
+        
+        # Логируем клик (только первый раз, не переписываем)
+        if vm.clicked_at is None:
+            await session.execute(
+                update(VacancyMatch)
+                .where(VacancyMatch.id == match_id)
+                .values(clicked_at=datetime.now(timezone.utc))
+            )
+            await session.commit()
+    
+    return web.HTTPFound(location=url)
 
 def create_web_app(bot: Bot) -> web.Application:
     """Создать aiohttp приложение с webhook handler'ом и health check."""
@@ -245,5 +280,6 @@ def create_web_app(bot: Bot) -> web.Application:
     app["session_factory"] = async_sessionmaker(engine, expire_on_commit=False)
 
     app.router.add_post(settings.tribute_webhook_path, tribute_webhook)
+    app.router.add_get("/click/{match_id}", handle_click)
     app.router.add_get("/health", health)
     return app

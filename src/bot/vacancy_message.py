@@ -5,6 +5,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.agents.matcher import MatchResult
 from src.sources.base import Vacancy
+from src.config import settings
 
 
 def _escape_md(text: str) -> str:
@@ -25,7 +26,7 @@ def _score_emoji(score: float) -> str:
     return "💭"
 
 
-def format_vacancy_message(vacancy: Vacancy, match: MatchResult) -> str:
+def format_vacancy_message(vacancy: Vacancy, match: MatchResult, match_id: int | None = None) -> str:
     """Build a clean MarkdownV2 message for one matched vacancy."""
     parts = []
     emoji = _score_emoji(match.score)
@@ -55,7 +56,12 @@ def format_vacancy_message(vacancy: Vacancy, match: MatchResult) -> str:
             parts.append(f"• {_escape_md(flag)}")
         parts.append("")
 
-    parts.append(f"[Открыть вакансию]({_escape_url(vacancy.url)})")
+    # Click-tracking: если есть match_id и настроен public_base_url — идём через redirect
+    if match_id is not None and settings.public_base_url:
+        click_url = f"{settings.public_base_url}/click/{match_id}"
+    else:
+        click_url = vacancy.url
+    parts.append(f"[Открыть вакансию]({_escape_url(click_url)})")
     return "\n".join(parts)
 
 

@@ -157,6 +157,7 @@ class VacancyMatch(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    clicked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     user_reaction: Mapped[UserReaction | None] = mapped_column(
         Enum(UserReaction, name="user_reaction"), nullable=True
     )
