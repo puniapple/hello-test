@@ -28,6 +28,7 @@ from docx.shared import Pt, RGBColor, Inches
 
 from src.services.claude import ClaudeService
 from src.sources.base import Vacancy
+from datetime import datetime, timezone
 
 log = structlog.get_logger(__name__)
 
@@ -42,6 +43,11 @@ RESUME_SYSTEM_PROMPT = """\
 Задача: собрать резюме конкретного человека под конкретную вакансию, \
 которое пройдёт ATS-фильтры и вызовет желание пригласить на интервью.
 
+СЕГОДНЯШНЯЯ ДАТА: {current_date}. При расчёте опыта работы \
+(например "N лет опыта", "работает с YYYY года") используй эту дату, \
+не свои представления о времени. Если в резюме указано "с ноября 2021 по н.в." \
+и сегодня 28 июля 2026 — это 4 года 8 месяцев опыта, а не 3.5.
+
 ЖЁСТКИЕ ПРАВИЛА:
 
 1. ЯЗЫК: определи по языку описания вакансии. Русскоязычная вакансия — резюме на русском. \
@@ -50,6 +56,10 @@ RESUME_SYSTEM_PROMPT = """\
 2. ФАКТОЛОГИЯ: используй только факты из профиля и загруженных резюме. \
 Не выдумывай компании, роли, цифры, даты. Если данных нет — обходи их, \
 не заполняй placeholder'ами.
+
+2a. КОНТАКТЫ: обязательно найди в тексте загруженных резюме (cv_sources) \
+email, телефон, Telegram, LinkedIn, город/страну проживания. Вставь их в шапку резюме. \
+Если в резюме контактов нет — оставь только имя и headline без пустых плейсхолдеров.
 
 3. АДАПТАЦИЯ ПОД ВАКАНСИЮ:
 - Проанализируй ключевые требования вакансии (обязательные навыки, что важно бизнесу)
@@ -397,9 +407,12 @@ class ResumeService:
     async def generate(self, profile_data: dict, vacancy: Vacancy) -> ResumeResult:
         user_message = _build_user_message(vacancy, profile_data)
 
+        system_prompt = RESUME_SYSTEM_PROMPT.format(
+            current_date=datetime.now(timezone.utc).strftime("%d.%m.%Y")
+        )
         response = await self.claude.chat(
             messages=[{"role": "user", "content": user_message}],
-            system=RESUME_SYSTEM_PROMPT,
+            system=system_prompt,
             max_tokens=4096,
             model=RESUME_MODEL,
         )
