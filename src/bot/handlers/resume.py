@@ -149,7 +149,7 @@ async def handle_resume(callback: CallbackQuery) -> None:
 
         try:
             service = ResumeService()
-            result = await service.generate(profile.profile_data, vacancy)
+            result = await service.generate(profile.profile_data, vacancy, bot=callback.bot)
         except Exception as e:
             log.error("resume_generation_failed", user_id=user.id, error=str(e))
             await thinking_msg.edit_text(

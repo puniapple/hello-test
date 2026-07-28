@@ -118,9 +118,11 @@ class ProfileAgent:
         user_text: str,
         extra_content_blocks: list[dict[str, Any]] | None = None,
         persist_user_message: bool = True,
+        extra_context: dict | None = None,
     ) -> AgentReply:
         """Process a user message and return agent reply."""
         async with async_session() as session:
+            self._extra_context = extra_context or {}
             history = await self._load_history(session, user_id)
             if persist_user_message:
                 await self._save_message(session, user_id, ChatRole.user, user_text)
@@ -214,16 +216,18 @@ class ProfileAgent:
         if tool_name == "add_cv_source":
             filename = tool_input["filename"]
             summary_extracted = tool_input["summary_extracted"]
+            telegram_file_id = getattr(self, "_extra_context", {}).get("telegram_file_id")
             profile = await self._get_profile(session, user_id)
             data = dict(profile.profile_data or {})
             sources = list(data.get("cv_sources") or [])
-            sources.append(
-                {
-                    "filename": filename,
-                    "uploaded_at": datetime.now(timezone.utc).isoformat(),
-                    "summary_extracted": summary_extracted,
-                }
-            )
+            cv_entry = {
+                "filename": filename,
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                "summary_extracted": summary_extracted,
+            }
+            if telegram_file_id:
+                cv_entry["telegram_file_id"] = telegram_file_id
+            sources.append(cv_entry)
             data["cv_sources"] = sources
             profile.profile_data = data
             await session.flush()

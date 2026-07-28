@@ -26,11 +26,19 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from docx.shared import Pt, RGBColor, Inches
 
-from src.services.claude import ClaudeService
+from src.services.claude import ClaudeService, build_pdf_content_block
 from src.sources.base import Vacancy
 from datetime import datetime, timezone
 
 log = structlog.get_logger(__name__)
+
+
+async def _download_pdf_by_file_id(bot, file_id: str) -> bytes:
+    """Скачать PDF из Telegram по file_id."""
+    tg_file = await bot.get_file(file_id)
+    buffer = io.BytesIO()
+    await bot.download_file(tg_file.file_path, destination=buffer)
+    return buffer.getvalue()
 
 RESUME_MODEL = "claude-sonnet-4-6"
 
@@ -60,6 +68,8 @@ RESUME_SYSTEM_PROMPT = """\
 2a. КОНТАКТЫ: обязательно найди в тексте загруженных резюме (cv_sources) \
 email, телефон, Telegram, LinkedIn, город/страну проживания. Вставь их в шапку резюме. \
 Если в резюме контактов нет — оставь только имя и headline без пустых плейсхолдеров.
+
+2b. ИСТОЧНИК ДАННЫХ: если в сообщении есть PDF-документ — читай его напрямую как источник истины. Там оригинал: контакты, точные даты работы, все детали. cv_sources[i].summary_extracted и profile_data — вспомогательная выжимка, используй её только если PDF нет.
 
 3. АДАПТАЦИЯ ПОД ВАКАНСИЮ:
 - Проанализируй ключевые требования вакансии (обязательные навыки, что важно бизнесу)
@@ -404,40 +414,35 @@ class ResumeService:
     def __init__(self, claude: ClaudeService | None = None):
         self.claude = claude or ClaudeService(model=RESUME_MODEL)
 
-    async def generate(self, profile_data: dict, vacancy: Vacancy) -> ResumeResult:
+    async def generate(self, profile_data: dict, vacancy: Vacancy, bot=None) -> ResumeResult:
         user_message = _build_user_message(vacancy, profile_data)
-
         system_prompt = RESUME_SYSTEM_PROMPT.format(
             current_date=datetime.now(timezone.utc).strftime("%d.%m.%Y")
         )
+        # Пытаемся достать оригинальный PDF последнего резюме — Sonnet прочитает его напрямую
+        pdf_block = None
+        if bot:
+            cv_sources = profile_data.get("cv_sources") or []
+            for cv in reversed(cv_sources):  # ищем последний где есть file_id
+                file_id = cv.get("telegram_file_id")
+                if not file_id:
+                    continue
+                try:
+                    pdf_bytes = await _download_pdf_by_file_id(bot, file_id)
+                    pdf_block = build_pdf_content_block(pdf_bytes, filename=cv.get("filename", "cv.pdf"))
+                    log.info("resume_using_original_pdf", filename=cv.get("filename"))
+                    break
+                except Exception as e:
+                    log.warning("resume_pdf_download_failed", error=str(e))
+                    continue
+        # Формируем content: PDF (если есть) + user_message
+        if pdf_block:
+            content: Any = [pdf_block, {"type": "text", "text": user_message}]
+        else:
+            content = user_message
         response = await self.claude.chat(
-            messages=[{"role": "user", "content": user_message}],
+            messages=[{"role": "user", "content": content}],
             system=system_prompt,
             max_tokens=4096,
             model=RESUME_MODEL,
-        )
-
-        raw = (response.text or "").strip()
-        if not raw:
-            raise ValueError("Claude returned empty resume response")
-
-        # Убираем возможные markdown-фенсы вокруг JSON
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
-
-        try:
-            resume_data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            log.error("resume_json_parse_failed", raw=raw[:500], error=str(e))
-            raise ValueError(f"Claude returned invalid JSON: {e}") from e
-
-        docx_bytes = _build_docx(resume_data)
-
-        diagnostics = resume_data.get("diagnostics") or {}
-        return ResumeResult(
-            docx_bytes=docx_bytes,
-            match_percent=int(diagnostics.get("match_percent", 0) or 0),
-            strong_alignment=list(diagnostics.get("strong_alignment") or []),
-            gaps=list(diagnostics.get("gaps") or []),
-            language=resume_data.get("language", "ru"),
         )

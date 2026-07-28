@@ -119,6 +119,7 @@ async def _feed_pdf_to_agent(
         user_id=user_id,
         user_text=f"Я прислал резюме '{filename}'. Разбери его и обнови профиль.",
         extra_content_blocks=[pdf_block],
+        extra_context={"telegram_file_id": file_id},
     )
     from src.services.profile_activation import try_auto_activate_search
     await try_auto_activate_search(message.bot, user.id)
@@ -177,6 +178,7 @@ async def callback_add_to_profile(callback: CallbackQuery) -> None:
             ),
             extra_content_blocks=[pdf_block],
             persist_user_message=False,
+            extra_context={"telegram_file_id": file_id},
         )
         from src.services.profile_activation import try_auto_activate_search
         await try_auto_activate_search(message.bot, user.id)
@@ -234,6 +236,7 @@ async def callback_find_under_cv(callback: CallbackQuery) -> None:
             ),
             extra_content_blocks=[pdf_block],
             persist_user_message=False,
+            extra_context={"telegram_file_id": file_id},
         )
         from src.services.profile_activation import try_auto_activate_search
         await try_auto_activate_search(message.bot, user.id)
