@@ -446,3 +446,29 @@ class ResumeService:
             max_tokens=4096,
             model=RESUME_MODEL,
         )
+
+        raw = (response.text or "").strip()
+        if not raw:
+            raise ValueError("Claude returned empty resume response")
+
+        # Убираем возможные markdown-фенсы вокруг JSON
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+
+        try:
+            resume_data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            log.error("resume_json_parse_failed", raw=raw[:500], error=str(e))
+            raise ValueError(f"Claude returned invalid JSON: {e}") from e
+
+        docx_bytes = _build_docx(resume_data)
+
+        diagnostics = resume_data.get("diagnostics") or {}
+        return ResumeResult(
+            docx_bytes=docx_bytes,
+            match_percent=int(diagnostics.get("match_percent", 0) or 0),
+            strong_alignment=list(diagnostics.get("strong_alignment") or []),
+            gaps=list(diagnostics.get("gaps") or []),
+            language=resume_data.get("language", "ru"),
+        )
+    
