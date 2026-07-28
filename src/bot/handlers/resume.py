@@ -151,7 +151,7 @@ async def handle_resume(callback: CallbackQuery) -> None:
             service = ResumeService()
             result = await service.generate(profile.profile_data, vacancy, bot=callback.bot)
         except Exception as e:
-            log.error("resume_generation_failed", user_id=user.id, error=str(e))
+            log.exception("resume_generation_failed", user_id=user.id, error=str(e))
             await thinking_msg.edit_text(
                 "Что-то не получилось собрать резюме. Попробуй ещё раз через минуту — эта попытка не зачлась в лимит.\n\n"
                 "Если повторяется — напиши @puniapple."
