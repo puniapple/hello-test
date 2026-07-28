@@ -416,9 +416,8 @@ class ResumeService:
 
     async def generate(self, profile_data: dict, vacancy: Vacancy, bot=None) -> ResumeResult:
         user_message = _build_user_message(vacancy, profile_data)
-        system_prompt = RESUME_SYSTEM_PROMPT.format(
-            current_date=datetime.now(timezone.utc).strftime("%d.%m.%Y")
-        )
+        current_date = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+        system_prompt = RESUME_SYSTEM_PROMPT.replace("{current_date}", current_date)
         # Пытаемся достать оригинальный PDF последнего резюме — Sonnet прочитает его напрямую
         pdf_block = None
         if bot:
