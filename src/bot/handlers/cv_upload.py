@@ -181,7 +181,7 @@ async def callback_add_to_profile(callback: CallbackQuery) -> None:
             extra_context={"telegram_file_id": file_id},
         )
         from src.services.profile_activation import try_auto_activate_search
-        await try_auto_activate_search(message.bot, user.id)
+        await try_auto_activate_search(callback.bot, user.id)
     except Exception as e:
         logger.exception("CV processing failed")
         await callback.message.answer(f"Не получилось прочитать твой PDF. Попробуй другой файл — или расскажи голосом, тоже работает.")
@@ -239,7 +239,7 @@ async def callback_find_under_cv(callback: CallbackQuery) -> None:
             extra_context={"telegram_file_id": file_id},
         )
         from src.services.profile_activation import try_auto_activate_search
-        await try_auto_activate_search(message.bot, user.id)
+        await try_auto_activate_search(callback.bot, user.id)
     except Exception as e:
         logger.exception("CV processing failed")
         await callback.message.answer(f"Не получилось прочитать твой PDF. Попробуй другой файл — или расскажи голосом, тоже работает.")
