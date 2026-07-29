@@ -5,7 +5,6 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.agents.matcher import MatchResult
 from src.sources.base import Vacancy
-from src.config import settings
 
 
 def _escape_md(text: str) -> str:
@@ -16,24 +15,34 @@ def _escape_md(text: str) -> str:
     return "".join(("\\" + ch) if ch in chars else ch for ch in str(text))
 
 
-def _score_emoji(score: float) -> str:
-    if score >= 8.5:
-        return "🔥"
-    if score >= 7.0:
-        return "✨"
-    if score >= 6.0:
-        return "👀"
-    return "💭"
+def _escape_url(url: str) -> str:
+    """For MarkdownV2 link URL, only ) and \\ need escaping."""
+    return url.replace("\\", "\\\\").replace(")", "\\)")
 
 
-def format_vacancy_message(vacancy: Vacancy, match: MatchResult, match_id: int | None = None) -> str:
-    """Build a clean MarkdownV2 message for one matched vacancy."""
+def _score_to_percent(score: float) -> int:
+    """Скор 0-10 → проценты 0-100."""
+    return max(0, min(100, int(round(score * 10))))
+
+
+def format_vacancy_message(
+    vacancy: Vacancy,
+    match: MatchResult,
+    user_plan: str = "free",
+) -> str:
+    """Собираем MarkdownV2 сообщение о вакансии.
+
+    Free: без скора, короткое саммари, CTA на кнопку "Оценить совпадение".
+    Pro/Grandfather: со скором в процентах, саммари, CTA на "Показать совпадения".
+    """
+    is_paid = user_plan.lower() in ("pro", "grandfather")
+
     parts = []
-    emoji = _score_emoji(match.score)
-    score_str = f"{match.score:.1f}".replace(".", "\\.")
-    parts.append(f"{emoji} *{score_str}/10*  {_escape_md(vacancy.title)}")
+    # ── Заголовок ─────────────────────────────
+    parts.append(f"✨ *{_escape_md(vacancy.title)}*")
     parts.append("")
 
+    # ── Мета: компания, локация, зарплата ──
     meta_lines = []
     if vacancy.company:
         meta_lines.append(f"🏢 {_escape_md(vacancy.company)}")
@@ -46,46 +55,62 @@ def format_vacancy_message(vacancy: Vacancy, match: MatchResult, match_id: int |
         parts.extend(meta_lines)
         parts.append("")
 
+    # ── Саммари роли (одно предложение) ───
+    # Теперь fit_reason — это описание сути роли, не оценка совпадения
     if match.fit_reason:
-        parts.append(f"*Почему подходит:*\n{_escape_md(match.fit_reason)}")
+        parts.append(_escape_md(match.fit_reason))
         parts.append("")
 
-    if match.red_flags:
-        parts.append("*⚠️ Обрати внимание:*")
-        for flag in match.red_flags[:5]:
-            parts.append(f"• {_escape_md(flag)}")
+    # ── Скор / CTA ────────────────────────
+    if is_paid:
+        percent = _score_to_percent(match.score)
+        parts.append(f"*Вакансия подходит тебе на {percent}%*")
         parts.append("")
-
-    # Click-tracking: если есть match_id и настроен public_base_url — идём через redirect
-    if match_id is not None and settings.public_base_url:
-        click_url = f"{settings.public_base_url}/click/{match_id}"
+        parts.append(
+            _escape_md(
+                "Чтобы узнать, в чём ты подходишь компании, а где есть пробелы — "
+                "нажми кнопку «Показать совпадения»"
+            )
+        )
     else:
-        click_url = vacancy.url
-    parts.append(f"[Открыть вакансию]({_escape_url(click_url)})")
+        parts.append(
+            _escape_md(
+                "Чтобы узнать, насколько тебе подходит эта вакансия, "
+                "нажми кнопку «Оценить совпадение»"
+            )
+        )
+    parts.append("")
+
+    # ── Ссылка ────────────────────────────
+    parts.append(f"[Открыть вакансию]({_escape_url(vacancy.url)})")
+
     return "\n".join(parts)
 
 
-def _escape_url(url: str) -> str:
-    """For MarkdownV2 link URL, only ) and \\ need escaping."""
-    return url.replace("\\", "\\\\").replace(")", "\\)")
-
-
-def build_reaction_keyboard(match_id: int) -> InlineKeyboardMarkup:
-    """Inline buttons: cover letter + resume adaptation.
-
-    Реакции 👍/👎/📨 убраны — по данным использования (см. SQL от 2026-07),
-    большинство юзеров ими не пользуются, а те кто пользуется — жмут почти
-    исключительно 👎 как жалобу. Полезнее иметь две функциональные кнопки.
-    Хендлеры react:* и модель UserReaction остаются в коде на случай отката.
+def build_reaction_keyboard(
+    match_id: int,
+    user_plan: str = "free",
+) -> InlineKeyboardMarkup:
+    """Три кнопки под каждой вакансией:
+    - "Оценить совпадение" (Free) / "Показать совпадения" (Pro) — первая
+    - "Написать сопроводительное" — вторая
+    - "Резюме под вакансию" — третья
     """
+    is_paid = user_plan.lower() in ("pro", "grandfather")
+    breakdown_label = "🎯 Показать совпадения" if is_paid else "🎯 Оценить совпадение"
+
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(
+                text=breakdown_label,
+                callback_data=f"breakdown:generate:{match_id}",
+            )],
             [InlineKeyboardButton(
                 text="✍️ Написать сопроводительное",
                 callback_data=f"cover:generate:{match_id}",
             )],
             [InlineKeyboardButton(
-                text="📄 Резюме под вакансию",
+                text="📝 Резюме под вакансию",
                 callback_data=f"resume:generate:{match_id}",
             )],
         ]
