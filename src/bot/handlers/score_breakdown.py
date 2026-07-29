@@ -1,6 +1,7 @@
 """Inline button handler for score breakdown."""
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from html import escape
 
@@ -17,6 +18,12 @@ from src.sources.base import SourceType, Vacancy
 
 log = structlog.get_logger(__name__)
 router = Router()
+
+# Tribute-ссылка на подписку (из твоей памяти по проекту)
+TRIBUTE_SUBSCRIPTION_URL = os.getenv(
+    "TRIBUTE_SUBSCRIPTION_URL",
+    "https://t.me/tribute/app?startapp=sZWl",
+)
 
 
 def _reconstruct_vacancy(vacancy_data: dict) -> Vacancy:
@@ -91,8 +98,13 @@ def _render_breakdown_pro(
 
 
 def _paywall_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка ведёт на Tribute-страницу подписки (URL-кнопка).
+
+    Не через callback upgrade:start (такого handler'а нет),
+    а напрямую на Tribute mini-app.
+    """
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="💎 Подключить Pro", callback_data="upgrade:start"),
+        InlineKeyboardButton(text="💎 Подключить Pro", url=TRIBUTE_SUBSCRIPTION_URL),
     ]])
 
 

@@ -202,8 +202,8 @@ async def _process_user(bot: Bot, user: User) -> dict:
 
                 await bot.send_message(
                     chat_id=user.telegram_id,
-                    text=format_vacancy_message(vacancy, match, match_id=vm.id),
-                    reply_markup=build_reaction_keyboard(vm.id),
+                    text=format_vacancy_message(vacancy, match, match_id=vm.id, user_plan=user.plan),
+                    reply_markup=build_reaction_keyboard(vm.id, user_plan=user.plan),
                     parse_mode="MarkdownV2",
                     disable_web_page_preview=False,
                 )
@@ -494,8 +494,8 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
 
                 await bot.send_message(
                     chat_id=user.telegram_id,
-                    text=format_vacancy_message(vacancy, match_result, match_id=vm.id),
-                    reply_markup=build_reaction_keyboard(vm.id),
+                    text=format_vacancy_message(vacancy, match_result, match_id=vm.id, user_plan=user.plan),
+                    reply_markup=build_reaction_keyboard(vm.id, user_plan=user.plan),
                     parse_mode="MarkdownV2",
                     disable_web_page_preview=False,
                 )

@@ -1,6 +1,8 @@
 """Formatting and inline keyboard for vacancy delivery messages."""
 from __future__ import annotations
 
+import os
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.agents.matcher import MatchResult
@@ -25,15 +27,30 @@ def _score_to_percent(score: float) -> int:
     return max(0, min(100, int(round(score * 10))))
 
 
+def _build_click_url(match_id: int, fallback_url: str) -> str:
+    """Формируем click-tracking URL, если задан PUBLIC_BASE_URL.
+
+    Если env-переменной нет — возвращаем исходный URL как есть (fallback).
+    Логика click-tracking живёт в src/web/server.py:handle_click.
+    """
+    base = (os.getenv("PUBLIC_BASE_URL") or "").rstrip("/")
+    if not base:
+        return fallback_url
+    return f"{base}/click/{match_id}"
+
+
 def format_vacancy_message(
     vacancy: Vacancy,
     match: MatchResult,
+    match_id: int,
     user_plan: str = "free",
 ) -> str:
     """Собираем MarkdownV2 сообщение о вакансии.
 
     Free: без скора, короткое саммари, CTA на кнопку "Оценить совпадение".
     Pro/Grandfather: со скором в процентах, саммари, CTA на "Показать совпадения".
+
+    match_id используется для click-tracking URL в ссылке «Открыть вакансию».
     """
     is_paid = user_plan.lower() in ("pro", "grandfather")
 
@@ -81,8 +98,9 @@ def format_vacancy_message(
         )
     parts.append("")
 
-    # ── Ссылка ────────────────────────────
-    parts.append(f"[Открыть вакансию]({_escape_url(vacancy.url)})")
+    # ── Ссылка (через click-tracker, если настроен) ──
+    click_url = _build_click_url(match_id, vacancy.url)
+    parts.append(f"[Открыть вакансию]({_escape_url(click_url)})")
 
     return "\n".join(parts)
 
