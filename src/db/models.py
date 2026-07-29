@@ -80,6 +80,9 @@ class User(Base):
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     expiry_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     gate_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    free_breakdown_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -222,6 +225,38 @@ class ResumeUsage(Base):
         nullable=True,
     )
     generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+        index=True,
+    )
+
+class ScoreBreakdown(Base):
+    """Разбор соответствия вакансии профилю юзера.
+
+    Генерится Sonnet по клику на кнопку "Оценить совпадение" (Free)
+    или "Показать совпадения" (Pro/Grandfather). Кешируется навсегда:
+    повторный клик на ту же вакансию не тратит триал у Free и не
+    генерит заново у Pro.
+    """
+    __tablename__ = "score_breakdowns"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(
+        ForeignKey("vacancy_matches.id", ondelete="CASCADE"),
+        unique=True,          # один разбор на матч
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    breakdown_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)  # проценты 0-100
+    model_used: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
