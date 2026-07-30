@@ -3,6 +3,9 @@
 # Telegram public channel usernames (без @, без https://t.me/)
 # Список добавляется/убирается здесь, релиз не нужен.
 TELEGRAM_CHANNELS: list[str] = [
+    # Добавлено 29.07.2026
+    "workshopjobs",
+    "peersglobaljobs",
     # Добавлено 17.07.2026
     "yuniorapp",
     "jobs_juniors_remote",
