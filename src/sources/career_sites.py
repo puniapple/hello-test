@@ -91,6 +91,9 @@ def _registry() -> dict[str, tuple]:
         # ─── Dream Job ───
         "dreamjob": ("Dream Job", "dreamjob", ""),
 
+        # ─── Х5 ───
+        "x5": ("X5 Retail Group", "x5", ""),
+
         # ─── Teamtailor HTML ───
         "sumsub": ("Sumsub", "teamtailor", "https://careers.sumsub.com/jobs", "sumsub"),
 
@@ -146,6 +149,9 @@ class CareerSiteSource(JobSource):
 
         if kind == "dreamjob":
             return await _fetch_dreamjob()
+
+        if kind == "x5":
+            return await _fetch_x5()
 
         if kind == "remotive":
             return await _fetch_remotive()
@@ -2016,4 +2022,137 @@ async def _fetch_dreamjob() -> list[Vacancy]:
                 },
             ))
 
+    return vacancies
+
+async def _fetch_x5() -> list[Vacancy]:
+    """Парсер rabota.x5.ru.
+
+    Розничные вакансии сети X5 Retail Group: Перекресток, Пятерочка,
+    Чижик, распределительные центры. Массовые роли: продавцы, кассиры,
+    директора магазинов, сотрудники супермаркетов, работники РЦ.
+
+    Стратегия: fetch HTML листинга, извлекаем __NEXT_DATA__, из него
+    берём swrFallback['vacancies/vacancies/'].items — там 10 вакансий
+    с полной информацией (name, city, businessUnit, полное описание).
+
+    Публичный API endpoint x5 закрыт, но эти 10 итемов прекешены
+    Next.js в HTML первичного рендера — можем их взять напрямую.
+    Дополнительная пагинация недоступна без headless-браузера.
+
+    Всего: 10 вакансий за один HTTP-запрос.
+    """
+    LISTING_URL = "https://rabota.x5.ru/vacancies"
+    TIMEOUT_SEC = 20
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                LISTING_URL,
+                timeout=aiohttp.ClientTimeout(total=TIMEOUT_SEC),
+                headers={"User-Agent": "Mozilla/5.0"},
+            ) as resp:
+                if resp.status != 200:
+                    log.warning("x5_bad_status", status=resp.status)
+                    return []
+                html = await resp.text()
+    except Exception as e:
+        log.warning("x5_fetch_failed", error=str(e))
+        return []
+
+    # Извлекаем __NEXT_DATA__ JSON
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+    if not m:
+        log.warning("x5_no_next_data")
+        return []
+
+    try:
+        data = json.loads(m.group(1))
+    except json.JSONDecodeError as e:
+        log.warning("x5_next_data_parse_failed", error=str(e))
+        return []
+
+    try:
+        items = (
+            data.get("props", {})
+                .get("pageProps", {})
+                .get("swrFallback", {})
+                .get("vacancies/vacancies/", {})
+                .get("items", [])
+        )
+    except AttributeError:
+        log.warning("x5_no_items_in_swr")
+        return []
+
+    if not items:
+        log.warning("x5_empty_items")
+        return []
+
+    vacancies: list[Vacancy] = []
+    for item in items:
+        try:
+            vacancy_id = item.get("id")
+            if not vacancy_id:
+                continue
+
+            title = item.get("name", "").strip()
+            if not title:
+                continue
+
+            city = (item.get("city") or "").strip() or None
+
+            # Компания — первый businessUnit (или список через запятую)
+            business_units = item.get("businessUnits") or []
+            companies = [bu.get("title", "").strip() for bu in business_units if bu.get("title")]
+            company = ", ".join(companies) if companies else "X5 Retail Group"
+
+            # Собираем описание из полей data
+            data_block = item.get("data") or {}
+            description_parts = []
+
+            main_resp = (data_block.get("mainResponsibilities") or "").strip()
+            if main_resp:
+                description_parts.append("Обязанности:\n" + main_resp)
+
+            prof_skills = (data_block.get("professionalSkills") or "").strip()
+            if prof_skills:
+                description_parts.append("Требования:\n" + prof_skills)
+
+            work_cond = (data_block.get("workingConditions") or "").strip()
+            if work_cond:
+                description_parts.append("Условия:\n" + work_cond)
+
+            key_features = data_block.get("keyFeatures") or []
+            if key_features:
+                description_parts.append(
+                    "Ключевые преимущества: " + ", ".join(str(f) for f in key_features)
+                )
+
+            description = "\n\n".join(description_parts)
+
+            # workFormat — часто null, но если есть, добавляем в описание
+            work_format = item.get("workFormat")
+            if work_format:
+                description = f"Формат работы: {work_format}\n\n{description}"
+
+            vacancies.append(Vacancy(
+                external_id=f"x5:{vacancy_id}",
+                source_type=SourceType.career_site,
+                title=title,
+                company=company,
+                url=f"https://rabota.x5.ru/vacancies/{vacancy_id}",
+                description=description,
+                salary=None,  # x5 не публикует зарплату в листинге
+                location=city,
+                published_at=None,
+                raw={
+                    "vacancy_id": vacancy_id,
+                    "business_units": [bu.get("title") for bu in business_units],
+                    "category_id": (item.get("category") or {}).get("id"),
+                },
+            ))
+        except Exception as e:
+            log.warning("x5_item_parse_failed", error=str(e))
+            continue
+
+    log.info("x5_fetched", total=len(vacancies))
     return vacancies
