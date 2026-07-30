@@ -21,6 +21,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from sqlalchemy import String, Integer, BigInteger, Text, ForeignKey, func
+from sqlalchemy.orm import Mapped, mapped_column
+from datetime import datetime
 
 class Base(DeclarativeBase):
     pass
@@ -89,6 +92,8 @@ class User(Base):
     )
 
     profile: Mapped["Profile"] = relationship(back_populates="user", uselist=False)
+
+    survey_awaiting: Mapped[str | None] = mapped_column(String(64), default=None, nullable=True)
 
 
 class Profile(Base):
@@ -262,3 +267,13 @@ class ScoreBreakdown(Base):
         nullable=False,
         index=True,
     )
+
+class SurveyResponse(Base):
+    __tablename__ = "survey_responses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    question_key: Mapped[str] = mapped_column(String(64), default="hard_job_search_072026")
+    answer_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

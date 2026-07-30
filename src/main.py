@@ -26,7 +26,7 @@ from src.db.session import async_session
 from src.services.billing import downgrade_expired_subscriptions, send_renewal_reminders
 from src.web.server import create_web_app
 from src.workers.job_search import run_job_search_cycle
-
+from src.bot.handlers.survey import router as survey_router
 
 def configure_logging() -> None:
     logging.basicConfig(
@@ -69,6 +69,7 @@ async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
     dp.include_router(commands_router)
+    dp.include_router(survey_router)
     dp.include_router(reactions_router)
     dp.include_router(cover_letter_router)
     dp.include_router(resume_router)
@@ -78,6 +79,7 @@ async def main() -> None:
     dp.include_router(profile_edit_router)
     dp.include_router(admin_router)
     dp.include_router(payments_router)
+    
 
     # --- aiohttp сервер для Tribute webhooks ---
     web_app = create_web_app(bot)
