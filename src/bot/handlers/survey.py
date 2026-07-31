@@ -1,7 +1,7 @@
 from aiogram import Router, F
 from aiogram.types import Message
 from sqlalchemy import select, update
-from src.models import User, SurveyResponse
+from src.db.models import User, SurveyResponse
 from src.db.session import async_session
 
 SURVEY_KEY = "hard_job_search_072026"
