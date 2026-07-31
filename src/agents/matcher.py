@@ -204,11 +204,15 @@ SENIORITY (НОВЫЙ БЛОК — ВАЖНО):
 
 ────────────────────────────────────────
 
-Ответ строго в JSON, БЕЗ markdown, БЕЗ преамбулы:
+КРИТИЧНО: Твой ответ должен быть ТОЛЬКО валидным JSON. Ничего до, ничего после.
+Никаких markdown-обёрток ```json```. Никаких объяснений после закрывающей скобки }.
+Никаких вводных фраз типа "Вот разбор:". Просто JSON, начинается с { и заканчивается }.
+
+Ответ:
 {
   "score": число от 0 до 10 (можно с десятыми, например 7.5),
-  "fit_reason": "ОДНО короткое предложение (до 15 слов) с сутью роли: что за должность, в каком контексте, ключевая специфика вакансии. Это НЕ оценка совпадения — это описание роли. Пример: 'Senior разработка бэкенда на Kotlin в финтех-компании, полностью удалённо' или 'Продюсер спецпроектов в EdTech с фокусом на B2B-коллаборации'. Пиши так, чтобы юзер сразу понял, о какой роли речь.",
-  "red_flags": ["короткие", "формулировки"] или [],
+  "fit_reason": "ОДНО короткое предложение...",
+  "red_flags": [...],
   "should_send": true/false
 }
 
@@ -286,14 +290,16 @@ class VacancyMatcher:
     def _parse_response(self, text: str) -> MatchResult | None:
         if not text:
             return None
-        # Иногда Claude добавляет ```json фенсы, несмотря на инструкцию
-        clean = text.strip()
-        if clean.startswith("```"):
-            clean = re.sub(r"^```(?:json)?\s*", "", clean)
-            clean = re.sub(r"\s*```$", "", clean)
+
+        # Извлекаем первый валидный JSON-объект из текста.
+        # Haiku иногда оборачивает в ```json ... ``` фенсы и/или пишет
+        # постскриптум вроде "Краткое объяснение:" после закрывающей }.
+        json_str = self._extract_first_json_object(text)
+        if json_str is None:
+            return None
 
         try:
-            data = json.loads(clean)
+            data = json.loads(json_str)
         except json.JSONDecodeError:
             return None
 
@@ -312,3 +318,45 @@ class VacancyMatcher:
             red_flags=red_flags,
             should_send=should_send,
         )
+
+    def _extract_first_json_object(self, text: str) -> str | None:
+        """Находит первую { и её парную закрывающую }, возвращает подстроку.
+
+        Учитывает вложенность и строки с фигурными скобками внутри значений.
+        Возвращает None если валидный объект не найден.
+        """
+        # Начало
+        start = text.find("{")
+        if start == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escape_next = False
+
+        for i in range(start, len(text)):
+            ch = text[i]
+
+            if escape_next:
+                escape_next = False
+                continue
+
+            if ch == "\\" and in_string:
+                escape_next = True
+                continue
+
+            if ch == '"':
+                in_string = not in_string
+                continue
+
+            if in_string:
+                continue
+
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:i + 1]
+
+        return None
