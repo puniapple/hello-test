@@ -39,4 +39,4 @@ async def catch_survey_answer(message: Message):
         )
         await session.commit()
 
-    await message.answer("Спасибо, записал🙏")
+    await message.answer("Спасибо, записала🙏🏼")
