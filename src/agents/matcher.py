@@ -217,7 +217,6 @@ SENIORITY (НОВЫЙ БЛОК — ВАЖНО):
 }
 
 should_send=true если score >= 4.5.
-"""
 
 
 @dataclass
