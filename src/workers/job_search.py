@@ -159,9 +159,11 @@ async def _process_user(bot: Bot, user: User) -> dict:
         matcher = VacancyMatcher()
         deliveries: list[tuple[Vacancy, MatchResult]] = []
         all_scores: list[float] = []
-        for vacancy in to_match:
+        for position, vacancy in enumerate(to_match, 1):
             try:
                 match = await matcher.match(profile.profile_data, vacancy)
+                if match.should_send:
+                    log.info("match_position", user_id=user.id, position=position, score=match.score, total_evals=len(to_match))
             except Exception as e:
                 log.warning("match_failed", url=vacancy.url, error=str(e))
                 continue
