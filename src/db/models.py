@@ -83,6 +83,9 @@ class User(Base):
     auto_renew: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     expiry_reminder_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     gate_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pending_paywall_notice: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     free_breakdown_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

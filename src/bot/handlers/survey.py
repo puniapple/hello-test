@@ -16,7 +16,7 @@ async def _is_awaiting_survey(message: Message) -> bool:
         awaiting = (await session.execute(
             select(User.survey_awaiting).where(User.telegram_id == message.from_user.id)
         )).scalar_one_or_none()
-    return awaiting == SURVEY_KEY
+        return bool(awaiting)  # ловим ЛЮБОЙ активный опрос, не только hard_job_search
 
 
 @router.message(F.text & ~F.text.startswith("/"), _is_awaiting_survey)
@@ -31,7 +31,7 @@ async def catch_survey_answer(message: Message):
         session.add(SurveyResponse(
             user_id=user.id,
             telegram_id=message.from_user.id,
-            question_key=SURVEY_KEY,
+            question_key=user.survey_awaiting or SURVEY_KEY,
             answer_text=message.text,
         ))
         await session.execute(

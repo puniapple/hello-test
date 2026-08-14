@@ -15,3 +15,4 @@ test_broadcast.py
 broadcast_launch.py
 _posts.txt
 survey_broadcast.py
+segment_broadcast.py
