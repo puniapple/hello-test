@@ -68,6 +68,10 @@ async def main() -> None:
 
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
+    # Middleware — one-shot paywall уведомление неактивным Free
+    from src.bot.middlewares.paywall_notice import PaywallNoticeMiddleware
+    dp.message.middleware(PaywallNoticeMiddleware())
+    dp.callback_query.middleware(PaywallNoticeMiddleware())
     dp.include_router(commands_router)
     dp.include_router(survey_router)
     dp.include_router(reactions_router)
