@@ -25,6 +25,8 @@ from src.sources.career_sites import CareerSiteSource
 from src.sources.telegram_channel import TelegramChannelSource
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
+from src.services.access import has_access, DAILY_LIMITS
+
 logger = structlog.get_logger(__name__)
 
 MAX_VACANCIES_PER_USER_PER_CYCLE = 100
@@ -125,6 +127,16 @@ async def _process_user(bot: Bot, user: User) -> dict:
         sources = await list_user_sources(session, user.id)
         if not sources:
             log.info("skip_no_sources")
+            return {"fetched": 0, "matched": 0, "delivered": 0}
+
+        # Access gate — если нет подписки и не grandfather, пропускаем юзера.
+        # Пусть ждёт триггера от middleware (paywall notice) через собственное сообщение боту.
+        if not has_access(user):
+            log.info(
+                "skip_no_access",
+                user_id=user.id,
+                telegram_username=user.telegram_username,
+            )
             return {"fetched": 0, "matched": 0, "delivered": 0}
 
         # 3. Fetch from all sources
@@ -448,23 +460,19 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
             user.plan == "pro" and user.plan_expires_at and user.plan_expires_at > now_utc
         )
         
-        if is_paid:
-            DAILY_LIMIT = 15
-            remaining_today = max(0, DAILY_LIMIT - delivered_today)
-            if is_matching_cycle:
-                remaining_cycles = CYCLES_PER_DAY
-            else:
-                cycles_done = await _estimate_cycles_done(session, user.id, today_start, now_utc)
-                remaining_cycles = max(1, CYCLES_PER_DAY - cycles_done)
+        # Единый лимит 3 вакансии в сутки для всех, у кого есть доступ.
+        # Free без доступа отсекаются раньше (см. Правку 3).
+        DAILY_LIMIT = DAILY_LIMITS["vacancies"]
+        remaining_today = max(0, DAILY_LIMIT - delivered_today)
+
+        if is_matching_cycle:
+            remaining_cycles = CYCLES_PER_DAY
         else:
-            # Free: только в matching-цикле, максимум 3 за раз, потом до завтра ничего
-            DAILY_LIMIT = 3
-            if is_matching_cycle:
-                remaining_today = max(0, DAILY_LIMIT - delivered_today)
-                remaining_cycles = 1  # шлём всё сразу
-            else:
-                remaining_today = 0  # в delivery-циклах Free ничего не получает
-                remaining_cycles = 1
+            cycles_done = await _estimate_cycles_done(
+                session, user.id, today_start, now_utc
+            )
+            remaining_cycles = max(1, CYCLES_PER_DAY - cycles_done)
+
         # Сколько отправить сейчас: равномерно по оставшимся циклам, но не больше остатка на день
         if len(buffer) == 0 or remaining_today == 0:
             to_send_now = 0
