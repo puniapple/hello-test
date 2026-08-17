@@ -13,18 +13,14 @@ from src.db.session import async_session
 from src.services.cover_letter import CoverLetterService
 from src.sources.base import SourceType, Vacancy
 
+from src.services.access import (
+    check_daily_limit,
+    has_access,
+    DAILY_LIMITS,
+)
+
 log = structlog.get_logger(__name__)
 router = Router()
-
-# Лимиты писем за скользящее окно 24ч. Grandfather = Pro.
-COVER_LETTER_LIMITS = {
-    "free": 1,
-    "pro": 5,
-    "grandfather": 5,
-}
-
-# Fallback, если plan неизвестного значения
-DEFAULT_LIMIT = 1
 
 # Максимальная длина одного Telegram-сообщения — 4096 символов.
 # Сопроводительное 130-220 слов = ~800-1400 символов, легко влезает.
@@ -45,17 +41,6 @@ def _reconstruct_vacancy(vacancy_data: dict) -> Vacancy:
         published_at=None,
         raw=vacancy_data.get("raw", {}),
     )
-
-
-async def _count_recent_letters(session, user_id: int) -> int:
-    """COUNT сгенерированных писем за последние 24 часа."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    result = await session.execute(
-        select(func.count(CoverLetterUsage.id))
-        .where(CoverLetterUsage.user_id == user_id)
-        .where(CoverLetterUsage.generated_at >= cutoff)
-    )
-    return result.scalar() or 0
 
 
 @router.callback_query(F.data.startswith("cover:"))
@@ -111,21 +96,23 @@ async def handle_cover_letter(callback: CallbackQuery) -> None:
                     await callback.answer()
                     return
 
-        limit = COVER_LETTER_LIMITS.get(plan, DEFAULT_LIMIT)
-        used = await _count_recent_letters(session, user.id)
+        # Access gate — сначала проверяем что у юзера вообще есть доступ
+        if not has_access(user):
+            await callback.answer()
+            await callback.message.answer(
+                "Бот работает только по подписке. Запустить поиск можно от 349₽ 👇🏼",
+                reply_markup=_paywall_keyboard(),
+            )
+            return
 
-        if used >= limit:
-            if plan == "free":
-                text = (
-                    "На Free я могу написать 1 сопроводительное в день — и я его уже написал. За следующим приходи завтра.\n\n"
-                    "Хочешь больше? На Pro можно до 5 сопроводительных в день. От 349₽ в неделю — /upgrade"
-                )
-            else:
-                text = (
-                    f"На сегодня всё — ты израсходовал все 5 сопроводительных за день. Следующее письмо напишу завтра.\n\n"
-                    f"Если тебе нужно больше — напиши @puniapple, что-нибудь придумаем."
-                )
-            await callback.message.answer(text)
+        # Лимит — 2 в сутки для всех, у кого есть доступ
+        allowed, used, limit = await check_daily_limit(session, user.id, "cover_letter")
+        if not allowed:
+            await callback.message.answer(
+                f"На сегодня всё — {limit} сопроводительных за сутки я уже написал. "
+                "Возвращайся завтра.\n\n"
+                "Если срочно нужно ещё — напиши @puniapple."
+            )
             await callback.answer()
             return
 
@@ -178,3 +165,20 @@ async def handle_cover_letter(callback: CallbackQuery) -> None:
         header = "Готово, лови сопроводительное — под эту вакансию и твой профиль:\n\n"
         await callback.message.answer(header + letter)
         await callback.message.answer(footer, parse_mode="Markdown")
+
+def _paywall_keyboard():
+    """Reuse из middleware или локально — две кнопки на Tribute."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from src.config import settings
+    buttons = []
+    if settings.tribute_subscription_weekly_url:
+        buttons.append([InlineKeyboardButton(
+            text="📅 Неделя — 349₽",
+            url=settings.tribute_subscription_weekly_url,
+        )])
+    if settings.tribute_subscription_monthly_url:
+        buttons.append([InlineKeyboardButton(
+            text="💎 Месяц — 990₽",
+            url=settings.tribute_subscription_monthly_url,
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
