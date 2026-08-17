@@ -88,12 +88,12 @@ async def cmd_upgrade(message: Message) -> None:
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
-            text="🔁 990₽ / месяц",
-            url=settings.tribute_subscription_monthly_url,
-        )],
-        [InlineKeyboardButton(
             text="⚡️ 349₽ / неделя",
             url=settings.tribute_subscription_weekly_url,
+        )],
+        [InlineKeyboardButton(
+            text="🔁 990₽ / месяц",
+            url=settings.tribute_subscription_monthly_url,
         )],
     ])
     await message.answer(
