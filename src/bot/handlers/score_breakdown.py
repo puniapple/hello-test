@@ -16,6 +16,8 @@ from src.db.session import async_session
 from src.services.score_breakdown import ScoreBreakdownService
 from src.sources.base import SourceType, Vacancy
 
+from src.services.access import check_daily_limit, has_access
+
 log = structlog.get_logger(__name__)
 router = Router()
 
@@ -44,30 +46,6 @@ def _reconstruct_vacancy(vacancy_data: dict) -> Vacancy:
 def _score_to_percent(match_score: float) -> int:
     """Скор 0-10 → проценты 0-100."""
     return max(0, min(100, int(round(match_score * 10))))
-
-
-def _render_breakdown_free(percent: int, pros: list[str], gaps: list[str]) -> str:
-    """Разбор для Free — без verdict, только % + списки."""
-    lines = [f"<b>Вакансия подходит тебе на {percent}%</b>", ""]
-
-    if pros:
-        lines.append("<b>Что совпадает:</b>")
-        for p in pros:
-            lines.append(f"— {escape(p)}")
-        lines.append("")
-
-    if gaps:
-        lines.append("<b>На что обратить внимание:</b>")
-        for g in gaps:
-            lines.append(f"— {escape(g)}")
-        lines.append("")
-
-    # F-CTA — конверсия на пике впечатления
-    lines.append(
-        "<i>Это был твой пробный разбор — по одному на Free. "
-        "В Pro я так разбираю каждую вакансию. /upgrade</i>"
-    )
-    return "\n".join(lines)
 
 
 def _render_breakdown_pro(
@@ -148,7 +126,6 @@ async def handle_breakdown(callback: CallbackQuery) -> None:
             return
 
         plan = (user.plan or "free").lower()
-        is_paid = plan in ("pro", "grandfather")
 
         # 1. Проверка БД-кеша по match_id
         existing = (await session.execute(
@@ -164,21 +141,28 @@ async def handle_breakdown(callback: CallbackQuery) -> None:
             gaps = data.get("gaps", []) or []
             verdict = data.get("verdict", "") or ""
 
-            if is_paid:
-                text = _render_breakdown_pro(percent, pros, gaps, verdict)
-            else:
-                text = _render_breakdown_free(percent, pros, gaps)
+            text = _render_breakdown_pro(percent, pros, gaps, verdict)
 
             await callback.answer()
             await callback.message.answer(text, parse_mode="HTML")
             return
 
-        # 2. Free с израсходованным триалом → pay-wall (не генерим)
-        if not is_paid and user.free_breakdown_used_at is not None:
+        # 2. Access gate — нет подписки/не grandfather → paywall
+        if not has_access(user):
             await callback.answer()
             await callback.message.answer(
-                PAYWALL_TEXT,
+                "Бот работает только по подписке. Запустить поиск можно от 349₽ 👇🏼",
                 reply_markup=_paywall_keyboard(),
+            )
+            return
+
+        # 2.5 Лимит — 2 разбора в сутки
+        allowed, used, limit = await check_daily_limit(session, user.id, "breakdown")
+        if not allowed:
+            await callback.answer()
+            await callback.message.answer(
+                f"На сегодня всё — {limit} разбора за сутки я уже сделал. "
+                "Возвращайся завтра."
             )
             return
 
@@ -236,17 +220,10 @@ async def handle_breakdown(callback: CallbackQuery) -> None:
             model_used=result.model_used,
         ))
 
-        # 7. Если это Free-триал — помечаем израсходованным
-        if not is_paid:
-            user.free_breakdown_used_at = datetime.now(timezone.utc)
-
         await session.commit()
 
         # 8. Рендер + отправка
-        if is_paid:
-            text = _render_breakdown_pro(percent, result.pros, result.gaps, result.verdict)
-        else:
-            text = _render_breakdown_free(percent, result.pros, result.gaps)
+        text = _render_breakdown_pro(percent, pros, gaps, verdict)
 
         try:
             await thinking_msg.delete()
