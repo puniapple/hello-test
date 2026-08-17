@@ -170,66 +170,68 @@ async def cmd_my_plan(message: Message) -> None:
         await message.answer("Я тебя ещё не знаю. /start чтобы начать.")
         return
 
-    # 5.3 — Grandfather
+    # Grandfather — доступ без подписки
     if user.plan == "grandfather":
         await message.answer(
-            "Твой тариф: <b>Pro 💎 ∞</b>\n\n"
-            "Бесплатный пожизненный доступ — как у пользователя раннего тестирования.\n\n"
-            "— Несколько подборок в день\n"
-            "— До 5 вакансий за раз\n"
-            "— До 5 сопроводительных в день\n"
-            "— До 3 резюме под вакансию в день\n\n"
+            "У тебя есть <b>полный доступ 💎</b>\n\n"
+            "Бесплатно и бессрочно — как у пользователя раннего тестирования.\n\n"
+            "— До 3 подходящих вакансий в день\n"
+            "— До 2 разборов соответствия в день\n"
+            "— До 2 сопроводительных в день\n"
+            "— До 2 резюме под вакансию в день\n\n"
             "Спасибо, что был со мной с самого начала.",
             parse_mode="HTML",
         )
         return
 
-    # 5.1 — Free
-    if user.plan != "pro":
+    # Активная подписка (weekly или monthly)
+    if user.subscription_status == "pro_active":
+        is_weekly = False
+        if user.last_payment_at and user.plan_expires_at:
+            period_days = (user.plan_expires_at - user.last_payment_at).days
+            is_weekly = period_days < 20
+
+        period_word = "неделя" if is_weekly else "месяц"
+        amount = "349₽" if is_weekly else "990₽"
+        expires = user.plan_expires_at.strftime("%d.%m.%Y") if user.plan_expires_at else "—"
+
         await message.answer(
-            "Твой тариф: <b>Free</b>.\n\n"
-            "— 1 подборка в день\n"
-            "— До 3 вакансий за раз\n"
-            "— 1 сопроводительное в день\n"
-            "— 1 резюме под вакансию за всё время\n\n"
-            "Хочешь больше? /upgrade",
+            f"Подписка активна ({period_word})\n\n"
+            f"— До 3 подходящих вакансий в день\n"
+            f"— До 2 разборов соответствия в день\n"
+            f"— До 2 сопроводительных в день\n"
+            f"— До 2 резюме под вакансию в день\n\n"
+            f"Следующее списание: {expires} ({amount})\n\n"
+            f"Отменить подписку: /cancel_subscription",
             parse_mode="HTML",
         )
+        return
 
-    # 5.2 — Pro: определяем период по разнице (expires - last_payment)
-    is_weekly = False
-    if user.last_payment_at:
-        period_days = (user.plan_expires_at - user.last_payment_at).days
-        is_weekly = period_days < 20
-    
-    period_word = "неделя" if is_weekly else "месяц"
-    amount = "349₽" if is_weekly else "990₽"
-    expires = user.plan_expires_at.strftime("%d.%m.%Y") if user.plan_expires_at else "—"
+    # Подписка отменена, но ещё действует до expiry
+    if user.subscription_status == "pro_cancelled_until_expiry":
+        expires = user.plan_expires_at.strftime("%d.%m.%Y") if user.plan_expires_at else "—"
+        await message.answer(
+            f"Подписка отменена, но ещё действует до {expires}.\n\n"
+            f"После этой даты доступ к боту закроется.\n\n"
+            f"Передумал? /upgrade",
+            parse_mode="HTML",
+        )
+        return
 
-    if user.subscription_status == "pro_active":
-        msg = (
-            f"Твой тариф: <b>Pro 💎</b> ({period_word})\n\n"
-            f"— Несколько подборок в день\n"
-            f"— До 5 вакансий за раз\n"
-            f"— До 5 сопроводительных в день\n"
-            f"— До 3 резюме под вакансию в день\n"
-            f"— Следующее списание: {expires} ({amount})\n\n"
-            f"Отменить подписку: /cancel_subscription"
+    # Подписка истекла
+    if user.subscription_status == "pro_expired":
+        expires = user.plan_expires_at.strftime("%d.%m.%Y") if user.plan_expires_at else "—"
+        await message.answer(
+            f"Подписка истекла {expires}.\n\n"
+            f"Возобновить доступ: /upgrade",
+            parse_mode="HTML",
         )
-    elif user.subscription_status == "pro_cancelled_until_expiry":
-        msg = (
-            f"Твой тариф: <b>Pro 💎</b> (отменена)\n\n"
-            f"Действует до: {expires}\n"
-            f"Дальше — переход на Free.\n\n"
-            f"Передумал? /upgrade"
-        )
-    elif user.subscription_status == "pro_expired":
-        msg = (
-            f"Твой Pro истёк {expires}.\n\n"
-            f"Сейчас ты на Free.\n\n"
-            f"Вернуть Pro: /upgrade"
-        )
-    else:
-        msg = f"💎 Pro\nДействует до: {expires}\nСтатус: {user.subscription_status}"
+        return
 
-    await message.answer(msg, parse_mode="HTML")
+    # Всё остальное — юзер без подписки (бывший free)
+    await message.answer(
+        "У тебя пока нет подписки.\n\n"
+        "Бот работает по подписке от 349₽ в неделю.\n\n"
+        "Подключить: /upgrade",
+        parse_mode="HTML",
+    )
