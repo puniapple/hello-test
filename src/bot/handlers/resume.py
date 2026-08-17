@@ -13,15 +13,15 @@ from src.db.session import async_session
 from src.services.resume import ResumeService
 from src.sources.base import SourceType, Vacancy
 
+from src.services.access import (
+    check_daily_limit,
+    has_access,
+    DAILY_LIMITS,
+    remaining_today,
+)
+
 log = structlog.get_logger(__name__)
 router = Router()
-
-# Free — 1 резюме за всё время жизни аккаунта.
-# Pro/Grandfather — 3 в скользящем окне 24 часа.
-FREE_LIFETIME_LIMIT = 1
-PAID_ROLLING_LIMIT = 3
-PAID_WINDOW_HOURS = 24
-
 
 def _reconstruct_vacancy(vacancy_data: dict) -> Vacancy:
     return Vacancy(
@@ -36,23 +36,6 @@ def _reconstruct_vacancy(vacancy_data: dict) -> Vacancy:
         published_at=None,
         raw=vacancy_data.get("raw", {}),
     )
-
-
-async def _count_lifetime(session, user_id: int) -> int:
-    result = await session.execute(
-        select(func.count(ResumeUsage.id)).where(ResumeUsage.user_id == user_id)
-    )
-    return result.scalar() or 0
-
-
-async def _count_last_24h(session, user_id: int) -> int:
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=PAID_WINDOW_HOURS)
-    result = await session.execute(
-        select(func.count(ResumeUsage.id))
-        .where(ResumeUsage.user_id == user_id)
-        .where(ResumeUsage.generated_at >= cutoff)
-    )
-    return result.scalar() or 0
 
 
 def _sanitize_filename(text: str, max_len: int = 60) -> str:
@@ -107,25 +90,24 @@ async def handle_resume(callback: CallbackQuery) -> None:
                     await callback.answer()
                     return
 
-        # ─── Проверка лимитов ───
-        if plan == "free":
-            already = await _count_lifetime(session, user.id)
-            if already >= FREE_LIFETIME_LIMIT:
-                await callback.message.answer(
-                    "На Free я могу собрать одно резюме.\n\n"
-                    "Хочешь ещё? На Pro тебе доступно до 3 резюме в день. От 349₽ в неделю — /upgrade"
-                )
-                await callback.answer()
-                return
-        else:
-            recent = await _count_last_24h(session, user.id)
-            if recent >= PAID_ROLLING_LIMIT:
-                await callback.message.answer(
-                    "Сегодня я собрал для тебя 3 резюме. Следующие 3 будут доступны завтра.\n\n"
-                    "Если срочно нужно ещё одно — напиши @puniapple, что-нибудь придумаем."
-                )
-                await callback.answer()
-                return
+        # Access gate
+        if not has_access(user):
+            await callback.answer()
+            await callback.message.answer(
+                "Бот работает только по подписке. Запустить поиск можно от 349₽ 👇🏼",
+                reply_markup=_paywall_keyboard(),
+            )
+            return
+
+        # Лимит — 2 резюме в сутки для всех, у кого есть доступ
+        allowed, used, limit = await check_daily_limit(session, user.id, "resume")
+        if not allowed:
+            await callback.message.answer(
+                f"На сегодня всё — {limit} резюме за сутки я уже собрал. "
+                "Возвращайся завтра."
+            )
+            await callback.answer()
+            return
 
         # ─── Профиль ───
         profile = (await session.execute(
@@ -199,11 +181,29 @@ async def handle_resume(callback: CallbackQuery) -> None:
                 "<i>Это твоё единственное резюме на Free-тарифе. На Pro — 3 резюме в сутки. /upgrade</i>"
             )
         else:
-            remaining = PAID_ROLLING_LIMIT - recent - 1
-            diag_lines.append("")
-            diag_lines.append(f"<i>Осталось на сегодня: {remaining} из {PAID_ROLLING_LIMIT}</i>")
+            left = remaining_today(used + 1, "resume")
+        diag_lines.append(
+            f"<i>Осталось на сегодня: {left} из {DAILY_LIMITS['resume']}</i>"
+        )
 
         await callback.message.answer(
             "\n".join(diag_lines),
             parse_mode="HTML",
         )
+
+
+def _paywall_keyboard():
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    from src.config import settings
+    buttons = []
+    if settings.tribute_subscription_weekly_url:
+        buttons.append([InlineKeyboardButton(
+            text="📅 Неделя — 349₽",
+            url=settings.tribute_subscription_weekly_url,
+        )])
+    if settings.tribute_subscription_monthly_url:
+        buttons.append([InlineKeyboardButton(
+            text="💎 Месяц — 990₽",
+            url=settings.tribute_subscription_monthly_url,
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
