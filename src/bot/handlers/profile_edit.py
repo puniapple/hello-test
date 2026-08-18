@@ -41,14 +41,37 @@ async def handle_text_in_editing(message: Message) -> None:
 
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-    ready = user.profile_ready_for_search if hasattr(user, "profile_ready_for_search") else False
-    if ready:
+    # Показываем кнопку "начать поиск" только если поиск ещё не активирован
+    # И профиль реально готов (достаточно полей заполнено)
+    from sqlalchemy import select
+    from src.db.models import Profile
+    from src.services.profile_validation import is_profile_ready
+    from src.db.session import async_session
+
+    already_active = user.profile_ready_for_search if hasattr(user, "profile_ready_for_search") else False
+
+    profile_is_ready = False
+    if not already_active:
+        async with async_session() as check_session:
+            p = (await check_session.execute(
+                select(Profile).where(Profile.user_id == user.id)
+            )).scalar_one_or_none()
+            if p:
+                profile_is_ready, _ = is_profile_ready(p.profile_data or {})
+
+    if already_active:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Завершить диалог (/done)", callback_data="profile:done")],
         ])
-    else:
+    elif profile_is_ready:
+        # Профиль готов, поиск ещё не активирован — предлагаем запустить
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🚀 Уже хватит, начать поиск!", callback_data="profile:start_search")],
+            [InlineKeyboardButton(text="✅ Завершить диалог (/done)", callback_data="profile:done")],
+        ])
+    else:
+        # Профиль ещё не заполнен — только завершить диалог, без активации
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="✅ Завершить диалог (/done)", callback_data="profile:done")],
         ])
 
