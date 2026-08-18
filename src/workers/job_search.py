@@ -95,6 +95,23 @@ async def _process_user(bot: Bot, user: User) -> dict:
     if use_buffer:
         return await _process_user_with_buffer(bot, user, log)
     now_utc = datetime.now(timezone.utc)
+
+async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
+    """Buffer-mode pipeline. Matching runs once per day (first cycle of the day),
+    delivery happens every cycle from the persistent buffer.
+
+    Buffer = VacancyMatch records with delivered_at IS NULL.
+    """
+    # Access gate — нет подписки и не grandfather, пропускаем.
+    # Даже накопленный буфер не доставляется тем, кто потерял доступ.
+    if not has_access(user):
+        log.info(
+            "skip_no_access_buffer",
+            user_id=user.id,
+            telegram_username=user.telegram_username,
+        )
+        return {"fetched": 0, "matched": 0, "delivered": 0}
+
     # Subscription gate: если канал настроен и юзер отписался — пропускаем
     from src.services.subscription import (
         is_required_channel_configured,
