@@ -264,6 +264,14 @@ async def _process_user_with_buffer(bot: Bot, user: User, log) -> dict:
 
     Buffer = VacancyMatch records with delivered_at IS NULL.
     """
+    # Access gate — нет подписки и не grandfather, пропускаем.
+    if not has_access(user):
+        log.info(
+            "skip_no_access_buffer",
+            user_id=user.id,
+            telegram_username=user.telegram_username,
+        )
+        return {"fetched": 0, "matched": 0, "delivered": 0}
     # Subscription gate (как в обычной функции)
     from src.services.subscription import (
         is_required_channel_configured,
