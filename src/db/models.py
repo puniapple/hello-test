@@ -86,6 +86,9 @@ class User(Base):
     pending_paywall_notice: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    shutdown_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     free_breakdown_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

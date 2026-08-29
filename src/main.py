@@ -69,9 +69,9 @@ async def main() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dp = Dispatcher()
     # Middleware — one-shot paywall уведомление неактивным Free
-    from src.bot.middlewares.paywall_notice import PaywallNoticeMiddleware
-    dp.message.middleware(PaywallNoticeMiddleware())
-    dp.callback_query.middleware(PaywallNoticeMiddleware())
+    from src.bot.middlewares.shutdown import ShutdownMiddleware
+    dp.message.middleware(ShutdownMiddleware())
+    dp.callback_query.middleware(ShutdownMiddleware())
     dp.include_router(commands_router)
     dp.include_router(survey_router)
     dp.include_router(reactions_router)
@@ -101,15 +101,15 @@ async def main() -> None:
 
     # --- Scheduler: job search + expire subscriptions ---
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        run_job_search_cycle,
-        trigger=CronTrigger(hour="6, 12, 18"),
-        args=[bot],
-        id="job_search_cycle",
-        max_instances=1,
-        coalesce=True,
-        misfire_grace_time=600,
-    )
+    #scheduler.add_job(
+    #    run_job_search_cycle,
+    #    trigger=CronTrigger(hour="6, 12, 18"),
+    #    args=[bot],
+    #    id="job_search_cycle",
+    #    max_instances=1,
+    #    coalesce=True,
+    #    misfire_grace_time=600,
+    #)
 
     async def expire_subscriptions_job():
         async with async_session() as session:
@@ -123,20 +123,20 @@ async def main() -> None:
             if result and any(result.values()):
                 log.info("renewal_reminders", **result)
     
-    scheduler.add_job(
-        expire_subscriptions_job,
-        trigger=IntervalTrigger(hours=1),
-        id="expire_subscriptions",
-        max_instances=1,
-        coalesce=True,
-    )
-    scheduler.add_job(
-        renewal_reminders_job,
-        trigger=CronTrigger(hour=9),  # раз в день в 9 UTC = 12 MSK
-        id="renewal_reminders",
-        max_instances=1,
-        coalesce=True,
-    )
+    #scheduler.add_job(
+    #    expire_subscriptions_job,
+    #    trigger=IntervalTrigger(hours=1),
+    #    id="expire_subscriptions",
+    #    max_instances=1,
+    #    coalesce=True,
+    #)
+    #scheduler.add_job(
+    #    renewal_reminders_job,
+    #    trigger=CronTrigger(hour=9),  # раз в день в 9 UTC = 12 MSK
+    #    id="renewal_reminders",
+    #    max_instances=1,
+    #    coalesce=True,
+    #)
 
     scheduler.start()
     
