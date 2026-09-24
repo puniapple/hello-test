@@ -81,6 +81,7 @@ def _registry() -> dict[str, tuple]:
         "remoteok": ("RemoteOK", "remoteok", ""),
         "remotive": ("Remotive", "remotive", ""),
         "himalayas": ("Himalayas", "himalayas", ""),
+        "linkedin": ("LinkedIn", "linkedin", ""),
         "wwr_programming": ("We Work Remotely (Programming)", "wwr", "programming"),
         "wwr_sales_marketing": ("We Work Remotely (Sales & Marketing)", "wwr", "sales-and-marketing"),
         "wwr_customer_support": ("We Work Remotely (Customer Support)", "wwr", "customer-support"),
@@ -163,6 +164,9 @@ class CareerSiteSource(JobSource):
 
         if kind == "himalayas":
             return await _fetch_himalayas()
+    
+        if kind == "linkedin":
+            return await _fetch_linkedin()
 
         if kind == "wwr":
             category = entry[2]
@@ -1504,6 +1508,79 @@ async def _fetch_himalayas(max_pages: int = 40, max_age_hours: int = 48) -> list
             if too_old or not cursor:
                 break
             await asyncio.sleep(1)
+
+    return vacancies
+
+LINKEDIN_KEYWORDS = [
+    "product manager", "product marketing manager", "growth manager",
+    "business development", "partnerships manager", "product analyst",
+]
+LINKEDIN_LOCATIONS = [
+    "Kazakhstan", "Georgia", "Armenia", "Serbia", "Cyprus", "United Arab Emirates",
+]
+
+
+async def _fetch_linkedin() -> list[Vacancy]:
+    """Фетчер LinkedIn через публичный гостевой поиск (без логина).
+
+    Только карточки поиска: title, company, location, дата, ссылка.
+    Описание НЕ грузим (иначе N+1 запросов и блок) — его догружает модуль постинга.
+    """
+    import asyncio
+
+    base = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+    seen: set[str] = set()
+    vacancies: list[Vacancy] = []
+    blocked = 0
+
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
+        for loc in LINKEDIN_LOCATIONS:
+            for kw in LINKEDIN_KEYWORDS:
+                params = {"keywords": kw, "location": loc, "f_TPR": "r86400", "start": 0}
+                try:
+                    r = await client.get(base, params=params, headers={"User-Agent": USER_AGENT})
+                except httpx.HTTPError:
+                    continue
+                if r.status_code != 200:
+                    blocked += 1
+                    if blocked >= 3:
+                        return vacancies  # LinkedIn режет — не долбим дальше
+                    await asyncio.sleep(5)
+                    continue
+
+                soup = BeautifulSoup(r.text, "html.parser")
+                for card in soup.select("div.base-card"):
+                    urn = card.get("data-entity-urn", "")
+                    job_id = urn.rsplit(":", 1)[-1]
+                    if not job_id or job_id in seen:
+                        continue
+                    seen.add(job_id)
+
+                    title_el = card.select_one("h3.base-search-card__title")
+                    company_el = card.select_one("h4.base-search-card__subtitle")
+                    loc_el = card.select_one("span.job-search-card__location")
+                    time_el = card.select_one("time")
+                    title = title_el.get_text(strip=True) if title_el else ""
+                    if not title:
+                        continue
+                    company = company_el.get_text(strip=True) if company_el else None
+                    location = loc_el.get_text(strip=True) if loc_el else loc
+
+                    vacancies.append(
+                        Vacancy(
+                            external_id=f"linkedin:{job_id}",
+                            source_type=SourceType.career_site,
+                            title=title[:200],
+                            company=company,
+                            url=f"https://www.linkedin.com/jobs/view/{job_id}",
+                            description=f"{title} — {company or ''} — {location}",
+                            salary=None,
+                            location=location,
+                            published_at=time_el.get("datetime") if time_el else None,
+                            raw={"site": "linkedin", "job_id": job_id, "query": kw, "search_location": loc},
+                        )
+                    )
+                await asyncio.sleep(2)
 
     return vacancies
 
