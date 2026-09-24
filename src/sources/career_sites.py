@@ -80,6 +80,7 @@ def _registry() -> dict[str, tuple]:
         # ─── Remote-доски с публичным API ───
         "remoteok": ("RemoteOK", "remoteok", ""),
         "remotive": ("Remotive", "remotive", ""),
+        "himalayas": ("Himalayas", "himalayas", ""),
         "wwr_programming": ("We Work Remotely (Programming)", "wwr", "programming"),
         "wwr_sales_marketing": ("We Work Remotely (Sales & Marketing)", "wwr", "sales-and-marketing"),
         "wwr_customer_support": ("We Work Remotely (Customer Support)", "wwr", "customer-support"),
@@ -159,6 +160,9 @@ class CareerSiteSource(JobSource):
 
         if kind == "remotive":
             return await _fetch_remotive()
+
+        if kind == "himalayas":
+            return await _fetch_himalayas()
 
         if kind == "wwr":
             category = entry[2]
@@ -1401,6 +1405,106 @@ async def _fetch_remotive() -> list[Vacancy]:
                 raw={"site": "remotive", "category": category},
             )
         )
+    return vacancies
+
+# Страны/регионы, откуда реально можно работать из СНГ или после релокации
+HIMALAYAS_OK_LOCATIONS = {
+    "georgia", "armenia", "kazakhstan", "kyrgyzstan", "uzbekistan",
+    "azerbaijan", "serbia", "montenegro", "cyprus", "turkey",
+    "united arab emirates", "russia", "belarus",
+    "worldwide", "anywhere", "europe", "emea", "eastern europe", "asia",
+}
+
+
+async def _fetch_himalayas(max_pages: int = 40, max_age_hours: int = 48) -> list[Vacancy]:
+    """Фетчер для Himalayas.app через публичный JSON API (cursor-пагинация).
+
+    Берёт только свежие вакансии (max_age_hours) и только доступные из СНГ:
+    пустой locationRestrictions (= worldwide) или пересечение с HIMALAYAS_OK_LOCATIONS.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+
+    api_url = "https://himalayas.app/jobs/api"
+    cutoff = datetime.now(timezone.utc).timestamp() - max_age_hours * 3600
+    vacancies: list[Vacancy] = []
+    cursor = None
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for _ in range(max_pages):
+            params = {"limit": 20}
+            if cursor:
+                params["cursor"] = cursor
+            try:
+                response = await client.get(api_url, params=params, headers={"User-Agent": USER_AGENT})
+                if response.status_code != 200:
+                    break
+                data = response.json()
+            except (httpx.HTTPError, ValueError):
+                break
+
+            jobs = data.get("jobs", [])
+            if not jobs:
+                break
+
+            too_old = False
+            for job in jobs:
+                pub = job.get("pubDate") or 0
+                if pub < cutoff:
+                    too_old = True
+                    continue
+
+                restrictions = [r.lower() for r in (job.get("locationRestrictions") or [])]
+                if restrictions and not (set(restrictions) & HIMALAYAS_OK_LOCATIONS):
+                    continue
+
+                title = (job.get("title") or "").strip()
+                url = (job.get("applicationLink") or job.get("guid") or "").strip()
+                if not title or not url:
+                    continue
+
+                desc_html = job.get("description") or ""
+                description = (
+                    BeautifulSoup(desc_html, "html.parser").get_text(" ", strip=True)[:2500]
+                    if desc_html else (job.get("excerpt") or title)
+                )
+                categories = ", ".join((job.get("parentCategories") or []) + (job.get("categories") or [])[:3])
+                if categories:
+                    description = f"{categories}\n{description}"
+
+                salary = None
+                if job.get("minSalary") or job.get("maxSalary"):
+                    salary = (
+                        f"{job.get('minSalary') or ''}–{job.get('maxSalary') or ''} "
+                        f"{job.get('currency') or ''}/{job.get('salaryPeriod') or ''}"
+                    ).strip()
+
+                location = "Remote: " + (", ".join(job.get("locationRestrictions") or []) or "Worldwide")
+
+                vacancies.append(
+                    Vacancy(
+                        external_id=f"himalayas:{job.get('guid') or url}",
+                        source_type=SourceType.career_site,
+                        title=title[:200],
+                        company=(job.get("companyName") or "").strip() or None,
+                        url=url,
+                        description=description,
+                        salary=salary,
+                        location=location,
+                        published_at=datetime.fromtimestamp(pub, timezone.utc).isoformat(),
+                        raw={
+                            "site": "himalayas",
+                            "seniority": job.get("seniority"),
+                            "location_restrictions": job.get("locationRestrictions"),
+                        },
+                    )
+                )
+
+            cursor = data.get("nextCursor")
+            if too_old or not cursor:
+                break
+            await asyncio.sleep(1)
+
     return vacancies
 
 
