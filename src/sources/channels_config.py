@@ -3,6 +3,15 @@
 # Telegram public channel usernames (без @, без https://t.me/)
 # Список добавляется/убирается здесь, релиз не нужен.
 TELEGRAM_CHANNELS: list[str] = [
+        # Добавлено 24.09.2026 — для канала вакансий
+    "projects_jobs_feed",
+    "productjobgo",
+    "marketing_jobs",
+    "prwork",
+    "perezvonyu",
+    "vdhl_good",
+    "seohr",
+    "foranalysts",
     # Добавлено 29.07.2026
     "workshopjobs",
     "peersglobaljobs",
@@ -70,8 +79,6 @@ TELEGRAM_CHANNELS: list[str] = [
     "edtech_jobs_ru",
     "skillbox_career",
     "netology_career",
-    "marketingjobs",
-    "marketing_jobs_ru",
     "cmo_jobs",
     "salesjobs_ru",
     "b2bsalesjobs",

@@ -97,16 +97,26 @@ class TelegramChannelSource(JobSource):
 
     @staticmethod
     def _looks_like_vacancy(text: str) -> bool:
-        """Heuristic: skip channel meta-posts, advertising, etc."""
+        """Heuristic: skip channel meta-posts, advertising, etc.
+
+        Мягкий фильтр: лучше пропустить лишнее — дальше отсеет
+        фильтр ниши и Haiku-вратарь в модуле постинга.
+        """
         text_lower = text.lower()
         positive_markers = [
-            "вакансия", "ищем", "ищу", "требуется", "позиция",
-            "looking for", "we are hiring", "hiring", "ждём",
-            "open role", "open position", "we're looking",
-            "обязанности", "responsibilities", "требования", "что нужно",
-            "зарплата", "salary", "от ", "компенсация", "вилка",
+            # ru
+            "ваканси", "ищем", "ищу", "требуется", "позиция",
+            "обязанности", "требования", "что нужно", "зарплата",
+            "компенсация", "вилка", "удалённ", "удаленн", "гибрид",
+            "релокац", "офис (", "откликнуться", "резюме",
+            # en
+            "looking for", "hiring", "open role", "open position",
+            "we're looking", "responsibilities", "requirements",
+            "salary", "job description", "remote", "hybrid",
+            "on-site", "relocation", "apply",
         ]
         return any(m in text_lower for m in positive_markers)
+
 
     @staticmethod
     def _extract_title(text: str) -> str:
