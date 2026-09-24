@@ -82,6 +82,7 @@ def _registry() -> dict[str, tuple]:
         "remotive": ("Remotive", "remotive", ""),
         "himalayas": ("Himalayas", "himalayas", ""),
         "linkedin": ("LinkedIn", "linkedin", ""),
+        "getmatch": ("getmatch", "getmatch", ""),
         "wwr_programming": ("We Work Remotely (Programming)", "wwr", "programming"),
         "wwr_sales_marketing": ("We Work Remotely (Sales & Marketing)", "wwr", "sales-and-marketing"),
         "wwr_customer_support": ("We Work Remotely (Customer Support)", "wwr", "customer-support"),
@@ -167,6 +168,9 @@ class CareerSiteSource(JobSource):
     
         if kind == "linkedin":
             return await _fetch_linkedin()
+
+        if kind == "getmatch":
+            return await _fetch_getmatch()
 
         if kind == "wwr":
             category = entry[2]
@@ -1581,6 +1585,104 @@ async def _fetch_linkedin() -> list[Vacancy]:
                         )
                     )
                 await asyncio.sleep(2)
+
+    return vacancies
+
+async def _fetch_getmatch(max_pages: int = 15, max_age_days: int = 7) -> list[Vacancy]:
+    """Фетчер getmatch.ru через их JSON API (/api/offers, offset-пагинация).
+
+    Порядок в выдаче не строго по дате, поэтому листаем всё и режем по published_at.
+    """
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    api_url = "https://getmatch.ru/api/offers"
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+    seen: set[int] = set()
+    vacancies: list[Vacancy] = []
+    offset = 0
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for _ in range(max_pages):
+            try:
+                r = await client.get(
+                    api_url, params={"limit": 100, "offset": offset},
+                    headers={"User-Agent": USER_AGENT},
+                )
+                if r.status_code != 200:
+                    break
+                offers = r.json().get("offers", [])
+            except (httpx.HTTPError, ValueError):
+                break
+            if not offers:
+                break
+
+            new_on_page = 0
+            for o in offers:
+                oid = o.get("id")
+                if oid is None or oid in seen:
+                    continue
+                seen.add(oid)
+                new_on_page += 1
+
+                if not o.get("is_active", True):
+                    continue
+                try:
+                    pub = datetime.fromisoformat(o.get("published_at", ""))
+                    if pub.tzinfo is None:
+                        pub = pub.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    pub = None
+                if pub and pub < cutoff:
+                    continue
+
+                title = (o.get("position") or "").strip()
+                rel_url = o.get("url") or f"/vacancies/{oid}"
+                if not title:
+                    continue
+
+                company = ((o.get("company") or {}).get("name") or "").strip() or None
+
+                locs = []
+                for it in o.get("location_items") or []:
+                    if it.get("exclude"):
+                        continue
+                    label, fmt = it.get("label") or "", it.get("format") or ""
+                    locs.append(f"{label} ({fmt})" if fmt else label)
+                location = ", ".join(locs) or None
+
+                salary = None
+                if not o.get("salary_hidden"):
+                    lo, hi = o.get("salary_display_from"), o.get("salary_display_to")
+                    cur = o.get("salary_currency") or ""
+                    if lo or hi:
+                        salary = f"{lo or ''}–{hi or ''} {cur}".strip()
+
+                desc_html = o.get("offer_description") or o.get("description_html") or ""
+                description = (
+                    BeautifulSoup(desc_html, "html.parser").get_text(" ", strip=True)[:2500]
+                    if desc_html else title
+                )
+
+                vacancies.append(
+                    Vacancy(
+                        external_id=f"getmatch:{oid}",
+                        source_type=SourceType.career_site,
+                        title=title[:200],
+                        company=company,
+                        url=f"https://getmatch.ru{rel_url}",
+                        description=description,
+                        salary=salary,
+                        location=location,
+                        published_at=pub.isoformat() if pub else None,
+                        raw={"site": "getmatch", "offer_type": o.get("offer_type")},
+                    )
+                )
+
+            if new_on_page == 0:
+                break  # пагинация не двигается — выходим
+            offset += len(offers)
+            await asyncio.sleep(1)
 
     return vacancies
 
