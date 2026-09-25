@@ -81,6 +81,13 @@ class TelegramChannelSource(JobSource):
         published_at = time_node.get("datetime") if time_node else None
 
         post_url = f"https://t.me/{channel_username}/{post_id.split('/')[-1]}"
+        # Ссылки из поста (в тексте и на inline-кнопках) — для ссылки на отклик
+        links = []
+        for a in block.select(".tgme_widget_message_text a[href], a.tgme_widget_message_inline_button[href]"):
+            href = (a.get("href") or "").strip()
+            if href.startswith("http") and href not in {l["href"] for l in links}:
+                links.append({"href": href, "text": a.get_text(" ", strip=True)[:80]})
+
 
         return Vacancy(
             external_id=external_id,
@@ -92,7 +99,7 @@ class TelegramChannelSource(JobSource):
             salary=salary,
             location=location,
             published_at=published_at,
-            raw={"channel": channel_username, "text": text},
+            raw={"channel": channel_username, "text": text, "links": links},
         )
 
     @staticmethod
