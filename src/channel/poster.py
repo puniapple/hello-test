@@ -216,29 +216,38 @@ async def _already_seen(hashes: list[str], fps: list[str]) -> set[str]:
         return seen
 
 
-async def prefilter(vacancies: list[Vacancy]) -> list[Vacancy]:
+async def prefilter(vacancies: list[Vacancy]) -> tuple[list[Vacancy], Counter]:
+    """Сито правилами + дедуп. Возвращает прошедших и счётчик причин отсева."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=cfg.MAX_AGE_DAYS)
-    out, fps = [], set()
+    out, fps, cut = [], set(), Counter()
     for v in vacancies:
         fp = v.content_fingerprint
         if fp in fps:
+            cut["дубль_в_сборе"] += 1
             continue
         fps.add(fp)
-        if not cfg.in_niche(v.title, v.description) or cfg.is_blacklisted(v.company):
+        if not cfg.in_niche(v.title, v.description):
+            cut["не_ниша"] += 1
+            continue
+        if cfg.is_blacklisted(v.company):
+            cut["чёрный_список"] += 1
             continue
         d = _parse_dt(v.published_at)
-        if d and d < cutoff:
-            continue
-        if d is None and not _is_tg(v):
+        if (d and d < cutoff) or (d is None and not _is_tg(v)):
+            cut["старая_или_без_даты"] += 1
             continue
         if not _is_tg(v) and not cfg.geo_ok(v.location, v.description):
-            continue  # офис/гибрид вне СНГ без релокации
+            cut["гео"] += 1
+            continue
         if _is_tg(v) and not _tg_links(v):
-            continue  # в посте нет ни одной ссылки для отклика — не наш формат
+            cut["tg_без_ссылки"] += 1
+            continue
         out.append(v)
 
     seen = await _already_seen([v.hash for v in out], [v.content_fingerprint for v in out])
-    return [v for v in out if v.hash not in seen and v.content_fingerprint not in seen]
+    fresh = [v for v in out if v.hash not in seen and v.content_fingerprint not in seen]
+    cut["уже_было_в_канале"] = len(out) - len(fresh)
+    return fresh, cut
 
 
 BOARDS = {"remoteok", "remotive", "habr_career", "hirehi", "dreamjob"}
@@ -418,6 +427,27 @@ async def _save(v: Vacancy, s: dict, status: str, message_id: int | None = None)
         await session.commit()
 
 
+async def _save_run(st: dict) -> None:
+    """Одна строка в channel_runs на каждый боевой цикл (и на упавший тоже)."""
+    try:
+        async with async_session() as session:
+            await session.execute(
+                text("INSERT INTO channel_runs (started_at, finished_at, with_linkedin, collected, "
+                     "after_sieve, sieve_cut, to_score, by_group, scored, approved, quality, picked, "
+                     "posted, card_failed, send_failed, posted_sources, error) VALUES "
+                     "(:started_at, :finished_at, :with_linkedin, :collected, :after_sieve, "
+                     "CAST(:sieve_cut AS JSONB), :to_score, CAST(:by_group AS JSONB), :scored, :approved, "
+                     ":quality, :picked, :posted, :card_failed, :send_failed, "
+                     "CAST(:posted_sources AS JSONB), :error)"),
+                {**st, "sieve_cut": json.dumps(st["sieve_cut"], ensure_ascii=False),
+                 "by_group": json.dumps(st["by_group"], ensure_ascii=False),
+                 "posted_sources": json.dumps(st["posted_sources"], ensure_ascii=False)},
+            )
+            await session.commit()
+    except Exception as e:  # noqa: BLE001 — статистика не должна ронять цикл
+        logger.warning("channel_run_stats_failed: %s", str(e)[:200])
+
+
 async def _send(bot, card: str) -> int | None:
     from aiogram.exceptions import TelegramRetryAfter
     for _ in range(3):
@@ -431,39 +461,68 @@ async def _send(bot, card: str) -> int | None:
 
 
 async def run_channel_cycle(bot=None, dry_run: bool = True, fetch_linkedin: bool = True) -> None:
+    st = {"started_at": datetime.now(timezone.utc), "finished_at": None, "with_linkedin": fetch_linkedin,
+          "collected": 0, "after_sieve": 0, "sieve_cut": {}, "to_score": 0, "by_group": {},
+          "scored": 0, "approved": 0, "quality": 0, "picked": 0, "posted": 0,
+          "card_failed": 0, "send_failed": 0, "posted_sources": {}, "error": None}
+    try:
+        await _cycle(bot, dry_run, fetch_linkedin, st)
+    except Exception as e:  # noqa: BLE001
+        st["error"] = f"{type(e).__name__}: {str(e)[:500]}"
+        logger.exception("channel_cycle_failed")
+        raise
+    finally:
+        st["finished_at"] = datetime.now(timezone.utc)
+        print(f"═══ канал: собрано {st['collected']} → сито {st['after_sieve']} → на оценку {st['to_score']} "
+              f"→ оценено {st['scored']} → post=true {st['approved']} → качественных {st['quality']} "
+              f"→ выбрано {st['picked']} → опубликовано {st['posted']} | отсев: {st['sieve_cut']} "
+              f"| группы: {st['by_group']}" + (f" | ОШИБКА: {st['error']}" if st["error"] else ""),
+              flush=True)
+        if not dry_run:
+            await _save_run(st)
+
+
+async def _cycle(bot, dry_run: bool, fetch_linkedin: bool, st: dict) -> None:
     raw = await collect(fetch_linkedin=fetch_linkedin)
-    filtered = await prefilter(raw)
+    st["collected"] = len(raw)
+    filtered, cut = await prefilter(raw)
+    st["after_sieve"], st["sieve_cut"] = len(filtered), dict(cut)
     candidates = cap_round_robin(filtered, cfg.CANDIDATES_CAP)
+    st["to_score"], st["by_group"] = len(candidates), dict(Counter(_group(v) for v in candidates))
     scored = await score(candidates)
+    st["scored"] = len(scored)
+    st["approved"] = sum(1 for _, s in scored if s.get("post"))
+    st["quality"] = sum(1 for _, s in scored if s.get("post") and (s.get("score") or 0) >= cfg.MIN_SCORE)
     picked = select(scored)
+    st["picked"] = len(picked)
 
-    stats = Counter(_source(v) for v, _ in picked)
-    print(f"\n═══ канал: собрано {len(raw)} → сито {len(filtered)} → на оценку {len(candidates)} "
-          f"→ оценено {len(scored)} → post=true {sum(1 for _, s in scored if s.get('post'))} "
-          f"→ выбрано {len(picked)} {dict(stats)}")
-    print(f"на оценку по группам: {dict(Counter(_group(v) for v in candidates))}\n")
-
-    posted = 0
-    for v, s in picked:
+    posted_sources = Counter()
+    for n, (v, s) in enumerate(picked):
         card = await make_card(v)
         if not card:
-            print(f"✗ карточка не собралась: {v.title[:60]} ({_source(v)})")
+            st["card_failed"] += 1
+            print(f"✗ карточка не собралась: {v.title[:60]} ({_source(v)})", flush=True)
             if not dry_run:
                 await _save(v, s, "rejected")
             continue
 
         if dry_run:
-            print(f"── [{s.get('score')}] {_source(v)} · {s.get('reason')}\n{card}\n")
+            print(f"── [{s.get('score')}] {_source(v)} · {s.get('reason')}\n{card}\n", flush=True)
             continue
 
         message_id = await _send(bot, card)
         await _save(v, s, "posted" if message_id else "failed", message_id)
-        posted += bool(message_id)
-        await asyncio.sleep(cfg.PAUSE_BETWEEN_POSTS)
+        if message_id:
+            st["posted"] += 1
+            posted_sources[_source(v)] += 1
+        else:
+            st["send_failed"] += 1
+        if n < len(picked) - 1:  # после последнего поста не ждём
+            await asyncio.sleep(cfg.PAUSE_BETWEEN_POSTS)
+    st["posted_sources"] = dict(posted_sources)
 
     if not dry_run:
         picked_ids = {id(v) for v, _ in picked}
         for v, s in scored:
             if id(v) not in picked_ids and (not s.get("post") or (s.get("score") or 0) < cfg.MIN_SCORE):
                 await _save(v, s, "rejected")
-        print(f"опубликовано: {posted}")
