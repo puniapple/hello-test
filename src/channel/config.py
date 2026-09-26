@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import re
 
-CHANNEL_ID = os.getenv("CHANNEL_ID", "@findfcknjobme")
+CHANNEL_ID = os.getenv("CHANNEL_ID", "@puniapple_findjob")
 MODEL = os.getenv("CHANNEL_MODEL", "claude-haiku-4-5-20251001")
 
 POSTS_PER_RUN = 2          # сколько карточек за прогон (3 прогона в день)
