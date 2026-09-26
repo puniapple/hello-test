@@ -137,20 +137,28 @@ async def main() -> None:
     #    max_instances=1,
     #    coalesce=True,
     #)
-        # ─── Канал вакансий: 10:00, 14:00, 19:00 МСК (планировщик в UTC) ───
+            # ─── Канал вакансий: 9:00, 11:30, 14:00, 16:30, 19:00 МСК (планировщик в UTC) ───
     from src.channel.poster import run_channel_cycle
+
+    channel_day = {"bot": bot, "dry_run": False, "fetch_linkedin": False}
 
     scheduler.add_job(
         run_channel_cycle,
-        trigger=CronTrigger(hour=7, minute=0),
+        trigger=CronTrigger(hour=6, minute=0),
         kwargs={"bot": bot, "dry_run": False, "fetch_linkedin": True},
         id="channel_morning", max_instances=1, coalesce=True,
     )
     scheduler.add_job(
         run_channel_cycle,
+        trigger=CronTrigger(hour="8,13", minute=30),
+        kwargs=channel_day,
+        id="channel_day_half", max_instances=1, coalesce=True,
+    )
+    scheduler.add_job(
+        run_channel_cycle,
         trigger=CronTrigger(hour="11,16", minute=0),
-        kwargs={"bot": bot, "dry_run": False, "fetch_linkedin": False},
-        id="channel_day", max_instances=1, coalesce=True,
+        kwargs=channel_day,
+        id="channel_day_full", max_instances=1, coalesce=True,
     )
     scheduler.start()
     

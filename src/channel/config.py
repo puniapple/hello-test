@@ -7,7 +7,7 @@ import re
 CHANNEL_ID = os.getenv("CHANNEL_ID", "@puniapple_findjob")
 MODEL = os.getenv("CHANNEL_MODEL", "claude-haiku-4-5-20251001")
 
-POSTS_PER_RUN = 2          # сколько карточек за прогон (3 прогона в день)
+POSTS_PER_RUN = 3          # сколько карточек за прогон (3 прогона в день)
 MIN_SCORE = 6              # минимальная оценка Haiku для публикации
 CANDIDATES_CAP = 80        # сколько кандидатов максимум отдаём Haiku на оценку
 SCORE_BATCH = 20           # вакансий в одном запросе на оценку
