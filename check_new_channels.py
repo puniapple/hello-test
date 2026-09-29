@@ -19,13 +19,20 @@ from check_channel_flow import in_niche
 from src.sources.telegram_channel import TelegramChannelSource
 
 CANDIDATES = [
-    # проверены вручную — существуют
-    "foranalysts", "marketing_jobs", "seohr", "prwork", "productjobgo",
-    "products_jobs", "projects_jobs",
-    # из каталогов — проверяем скриптом
-    "projects_jobs_feed", "agile_jobs", "analysts_hunter", "saba_hunter",
-    "tzprofi_job", "analyst_geeklink", "product_project_hr_geeklink",
-    "forgoandrust", "perezvonyu", "over100", "vdhl_good",
+    # маркетинг / PR / digital
+    "digital_jobster", "rabota_go", "jobforpr", "runello_rus_digitalmarketing",
+    "marketing_rabota_jobs", "workmarketingg", "hunty_jobs", "mediajobs_ru", "tj_collega",
+    # продукт / проекты / аналитика / продажи / топы
+    "forallsales", "jobfortm", "forchiefs", "runello_jobs_product", "runello_jobs_sales",
+    "runello_jobs_analyst", "jabroad", "c_level_top", "vacancyCRC", "bigtechjobs",
+    # работодатели
+    "ya_jobs", "careersber", "mtsbankcareer", "t_crew",
+    # удалёнка / релокация
+    "young_relocate", "evacuatejobs", "normremote", "work_finde", "digital_rabota",
+    "youritjob", "Remoteit", "hiddengurus", "jobs_inarmenia", "networkio_io",
+    "noborders_forwomen", "agilefluent", "jobsincyprus",
+    # из папки work
+    "jobcatcher", "theyseeku_it",
 ]
 
 UA = {"User-Agent": "Mozilla/5.0"}
