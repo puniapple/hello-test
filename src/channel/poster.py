@@ -401,7 +401,7 @@ def _render_tags(data: dict) -> str:
     return " ".join(f"#{t}" for t in ordered)
 
 
-async def make_card(v: Vacancy) -> str | None:
+async def make_card(v: Vacancy) -> tuple[str, dict] | None:
     if _source(v) == "linkedin":
         v = await enrich_linkedin(v)
     company_hint = "-" if _is_tg(v) else (v.company or "-")  # у TG в company лежит имя канала
@@ -445,21 +445,23 @@ async def make_card(v: Vacancy) -> str | None:
     lines.append(f'→ <a href="{e(apply_url)}">Откликнуться</a>')
     if tags_line:
         lines += ["", tags_line]
-    return "\n".join(lines)
+    meta = {"role": data.get("role"), "company": data.get("company"), "format": data.get("format"),
+            "salary": data.get("salary"), "tags": [t.lstrip("#") for t in tags_line.split()]}
+    return "\n".join(lines), meta
 
 
 # ─── 5. запись в БД и публикация ───
 
-async def _save(v: Vacancy, s: dict, status: str, message_id: int | None = None):
+async def _save(v: Vacancy, s: dict, status: str, message_id: int | None = None, card: dict | None = None):
     async with async_session() as session:
         await session.execute(
             text("INSERT INTO posted_to_channel "
-                 "(vacancy_hash, fingerprint, source, title, url, score, status, reason, message_id) "
-                 "VALUES (:h, :f, :src, :t, :u, :sc, :st, :r, :m) "
+                 "(vacancy_hash, fingerprint, source, title, url, score, status, reason, message_id, card) "
+                 "VALUES (:h, :f, :src, :t, :u, :sc, :st, :r, :m, CAST(:card AS JSONB)) "
                  "ON CONFLICT (vacancy_hash) DO NOTHING"),
             {"h": v.hash, "f": v.content_fingerprint, "src": _source(v), "t": v.title[:500],
              "u": v.url, "sc": s.get("score"), "st": status, "r": (s.get("reason") or "")[:300],
-             "m": message_id},
+             "m": message_id, "card": json.dumps(card, ensure_ascii=False) if card else None},
         )
         await session.commit()
 
@@ -535,7 +537,8 @@ async def _cycle(bot, dry_run: bool, fetch_linkedin: bool, st: dict) -> None:
 
     posted_sources = Counter()
     for n, (v, s) in enumerate(picked):
-        card = await make_card(v)
+        made = await make_card(v)
+        card, meta = made if made else (None, None)
         if not card:
             st["card_failed"] += 1
             print(f"✗ карточка не собралась: {v.title[:60]} ({_source(v)})", flush=True)
@@ -548,7 +551,7 @@ async def _cycle(bot, dry_run: bool, fetch_linkedin: bool, st: dict) -> None:
             continue
 
         message_id = await _send(bot, card)
-        await _save(v, s, "posted" if message_id else "failed", message_id)
+        await _save(v, s, "posted" if message_id else "failed", message_id, card=meta)
         if message_id:
             st["posted"] += 1
             posted_sources[_source(v)] += 1

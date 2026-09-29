@@ -160,6 +160,14 @@ async def main() -> None:
         kwargs=channel_day,
         id="channel_day_full", max_instances=1, coalesce=True,
     )
+    from src.channel.digest import run_digest
+
+    scheduler.add_job(
+        run_digest,
+        trigger=CronTrigger(day_of_week="sun", hour=17, minute=0),  # 20:00 МСК
+        kwargs={"bot": bot, "dry_run": False},
+        id="channel_digest", max_instances=1, coalesce=True,
+    )
     scheduler.start()
     
     log.info(

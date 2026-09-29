@@ -102,3 +102,15 @@ def geo_ok(location: str | None, description: str | None) -> bool:
     if not loc.strip() or re.search(r"remote|удал[её]н", loc, re.I):
         return True
     return False  # офис вне СНГ без релокации
+
+# ─── Воскресный дайджест ───
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "puniapple_findjob")
+DIGEST_TITLE = "Лучшие вакансии недели"
+DIGEST_PER_GROUP = 4
+DIGEST_MIN_SCORE = 6
+DIGEST_GROUPS = [
+    ("Продукт и проекты", ["продукт", "проджект", "операционка"]),
+    ("Рост бизнеса", ["продажи", "bizdev", "партнёрства", "growth", "стратегия"]),
+    ("Маркетинг", ["маркетинг", "pr"]),
+    ("Аналитика", ["аналитика"]),
+]
