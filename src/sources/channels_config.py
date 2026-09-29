@@ -3,7 +3,14 @@
 # Telegram public channel usernames (без @, без https://t.me/)
 # Список добавляется/убирается здесь, релиз не нужен.
 TELEGRAM_CHANNELS: list[str] = [
-        # Добавлено 24.09.2026 — для канала вакансий
+    # Добавлено 29.09.2026 — из каталога tgstat
+    "digital_jobster", "rabota_go", "runello_rus_digitalmarketing", "marketing_rabota_jobs",
+    "workmarketingg", "mediajobs_ru", "jobforpr", "hunty_jobs",
+    "runello_jobs_product", "runello_jobs_sales", "runello_jobs_analyst", "forallsales", "bigtechjobs",
+    "c_level_top", "vacancyCRC", "jobfortm", "forchiefs", "jabroad",
+    "young_relocate", "evacuatejobs", "normremote", "jobs_inarmenia", "networkio_io",
+    "noborders_forwomen", "youritjob", "theyseeku_it",
+    # Добавлено 24.09.2026 — для канала вакансий
     "projects_jobs_feed",
     "productjobgo",
     "marketing_jobs",
