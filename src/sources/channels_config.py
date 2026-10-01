@@ -3,6 +3,8 @@
 # Telegram public channel usernames (без @, без https://t.me/)
 # Список добавляется/убирается здесь, релиз не нужен.
 TELEGRAM_CHANNELS: list[str] = [
+    # Добавлено 02.10.2026 — из проверки блогов
+    "cliquejobs", "careerfedoroff", "hr_nikki", "liveitrecruitment",
     # Добавлено 29.09.2026 — из каталога tgstat
     "digital_jobster", "rabota_go", "runello_rus_digitalmarketing", "marketing_rabota_jobs",
     "workmarketingg", "mediajobs_ru", "jobforpr", "hunty_jobs",
